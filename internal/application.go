@@ -19,6 +19,7 @@ import (
 	"github.com/asolovov/evm-oracle-demo-api/internal/module"
 	"github.com/asolovov/evm-oracle-demo-api/internal/priceclient"
 	"github.com/asolovov/evm-oracle-demo-api/internal/server"
+	"github.com/asolovov/evm-oracle-demo-api/internal/wshub"
 	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
 	"github.com/asolovov/evm-oracle-demo-api/pkg/version"
 )
@@ -33,6 +34,7 @@ type App struct {
 	priceClient   priceclient.Client
 	indexerClient indexerclient.Client
 	registry      *aggregatorregistry.Registry
+	hub           *wshub.Hub
 	server        *server.Server
 
 	wg      sync.WaitGroup
@@ -104,6 +106,9 @@ func (app *App) Init() error {
 	}
 	app.server = srv
 
+	app.hub = wshub.NewHub(app.config.GRPCClient, app.priceClient, app.indexerClient, app.registry, wshub.Options{})
+	app.server.HandleWebSocket(app.hub.Serve)
+
 	logger.Log().Info("application initialised")
 	return nil
 }
@@ -114,6 +119,10 @@ func (app *App) Serve() error {
 	if app.server == nil {
 		return errors.New("Serve called before Init")
 	}
+
+	// Hub goroutines run independently of the http.Server lifecycle —
+	// Stop() drains them via Hub.Stop after the listener shuts down.
+	app.hub.Start(context.Background())
 
 	app.wg.Add(1)
 	errCh := make(chan error, 1)
@@ -150,6 +159,9 @@ func (app *App) Stop() error {
 				logger.Log().WithError(err).Warn("server shutdown error")
 				firstErr = err
 			}
+		}
+		if app.hub != nil {
+			app.hub.Stop()
 		}
 		app.wg.Wait()
 

@@ -42,6 +42,7 @@ func New(cfg config.HTTPConfig, api *handlers.API) (*Server, error) {
 
 	router := chi.NewRouter()
 	api.Register(router, middleware.CORS(cfg))
+	// WebSocket route is registered by Mount once the hub is constructed.
 
 	srv := &http.Server{
 		Addr:         net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)),
@@ -54,9 +55,14 @@ func New(cfg config.HTTPConfig, api *handlers.API) (*Server, error) {
 	return &Server{cfg: cfg, srv: srv, router: router}, nil
 }
 
-// Router returns the underlying chi mux. The WebSocket hub commit registers
-// its `/ws/stream` route here without going through handlers.Register.
+// Router returns the underlying chi mux. The hub mounts /ws/stream onto it.
 func (s *Server) Router() chi.Router { return s.router }
+
+// HandleWebSocket registers a handler under /ws/stream on the server's
+// router. Called by application.go after the hub is constructed.
+func (s *Server) HandleWebSocket(h http.HandlerFunc) {
+	s.router.Get("/ws/stream", h)
+}
 
 // Serve blocks until the listener errors. http.ErrServerClosed is the
 // expected shutdown signal and is suppressed.
