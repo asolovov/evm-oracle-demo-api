@@ -3,26 +3,43 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/asolovov/evm-oracle-demo-api/config"
+	"github.com/asolovov/evm-oracle-demo-api/internal/aggregatorregistry"
+	"github.com/asolovov/evm-oracle-demo-api/internal/handlers"
+	"github.com/asolovov/evm-oracle-demo-api/internal/indexerclient"
 	"github.com/asolovov/evm-oracle-demo-api/internal/module"
+	"github.com/asolovov/evm-oracle-demo-api/internal/priceclient"
+	"github.com/asolovov/evm-oracle-demo-api/internal/server"
 	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
 	"github.com/asolovov/evm-oracle-demo-api/pkg/version"
 )
 
-// App is the BFF application instance.
+// App is the BFF application instance. Per architecture rules 1+2 every
+// component is constructed and wired here; no module reaches out to others.
 type App struct {
 	config  *config.Scheme
 	version *version.Version
 	modules *module.Manager
+
+	priceClient   priceclient.Client
+	indexerClient indexerclient.Client
+	registry      *aggregatorregistry.Registry
+	server        *server.Server
+
+	wg      sync.WaitGroup
+	stopped sync.Once
 }
 
-// NewApplication constructs a new App.
+// NewApplication constructs an empty App. Wiring happens in Init.
 func NewApplication() (*App, error) {
 	ver, err := version.NewVersion()
 	if err != nil {
@@ -30,40 +47,127 @@ func NewApplication() (*App, error) {
 	}
 
 	return &App{
-		config:  &config.Scheme{},
-		version: ver,
-		modules: module.NewManager(),
+		config:   &config.Scheme{},
+		version:  ver,
+		modules:  module.NewManager(),
+		registry: aggregatorregistry.New(),
 	}, nil
 }
 
-// Init initialises every registered module. Real wiring lands in later tasks.
+// Init validates config, dials upstream services, seeds the aggregator
+// registry, and constructs the HTTP server.
 func (app *App) Init() error {
+	if err := app.config.Validate(); err != nil {
+		return fmt.Errorf("config validation: %w", err)
+	}
+
+	pc, err := priceclient.Dial(app.config.GRPCClient)
+	if err != nil {
+		return fmt.Errorf("price client: %w", err)
+	}
+	app.priceClient = pc
+
+	ix, err := indexerclient.Dial(app.config.GRPCClient)
+	if err != nil {
+		// Tear down the price client before bubbling the error so a
+		// later restart isn't holding a dangling conn.
+		_ = pc.Close()
+		return fmt.Errorf("indexer client: %w", err)
+	}
+	app.indexerClient = ix
+
+	// Best-effort registry seed. The BFF must come up even if the
+	// indexer is temporarily unreachable — build-tx returns 503 until the
+	// registry has the aggregator address. The WS hub will refresh on
+	// live AssetRegistered events in a later commit.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := app.registry.Load(ctx, ix); err != nil {
+		logger.Log().WithError(err).Warn("aggregator registry: initial load failed (will retry on first live event)")
+	}
+
+	api := &handlers.API{
+		Price:     app.priceClient,
+		Indexer:   app.indexerClient,
+		Registry:  app.registry,
+		Author:    app.config.Author,
+		Chain:     app.config.Chain,
+		Version:   app.Version(),
+		ServiceID: "evm-oracle-demo-api",
+	}
+
+	srv, err := server.New(app.config.HTTP, api)
+	if err != nil {
+		_ = pc.Close()
+		_ = ix.Close()
+		return fmt.Errorf("http server: %w", err)
+	}
+	app.server = srv
+
+	logger.Log().Info("application initialised")
 	return nil
 }
 
-// Serve starts the registered modules and blocks until a shutdown signal arrives.
+// Serve runs the listener in a background goroutine and blocks until a
+// shutdown signal arrives.
 func (app *App) Serve() error {
-	ctx := context.Background()
-	if err := app.modules.StartAll(ctx); err != nil {
-		return fmt.Errorf("start modules: %w", err)
+	if app.server == nil {
+		return errors.New("Serve called before Init")
 	}
+
+	app.wg.Add(1)
+	errCh := make(chan error, 1)
+	go func() {
+		defer app.wg.Done()
+		if err := app.server.Serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
 
 	logger.Log().Info("application is running, press Ctrl+C to stop")
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	<-quit
-	logger.Log().Info("shutdown signal received, stopping gracefully...")
 
+	select {
+	case <-quit:
+		logger.Log().Info("shutdown signal received, stopping gracefully...")
+	case err := <-errCh:
+		return fmt.Errorf("http listener: %w", err)
+	}
 	return nil
 }
 
-// Stop runs the module Stop graph with a bounded deadline.
+// Stop tears down listeners + upstream clients with a bounded deadline.
 func (app *App) Stop() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	var firstErr error
+	app.stopped.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
-	return app.modules.StopAll(ctx)
+		if app.server != nil {
+			if err := app.server.Shutdown(ctx); err != nil {
+				logger.Log().WithError(err).Warn("server shutdown error")
+				firstErr = err
+			}
+		}
+		app.wg.Wait()
+
+		if app.priceClient != nil {
+			if err := app.priceClient.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		if app.indexerClient != nil {
+			if err := app.indexerClient.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		if err := app.modules.StopAll(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	})
+	return firstErr
 }
 
 // Config exposes the config scheme.
