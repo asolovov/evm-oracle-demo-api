@@ -220,6 +220,62 @@ func TestHubDropsSlowConsumer(t *testing.T) {
 	}
 }
 
+func TestPriceLoopReconnectsAfterError(t *testing.T) {
+	// erroringPriceMock returns immediately with an error on Subscribe.
+	// After a brief sleep the loop should retry, which we observe by
+	// counting Subscribe invocations.
+	hub, _, _, _ := newTestHub(t)
+	hub.cfg.Subscribe.ReconnectBackoff = "10ms" // override to keep the test fast.
+	erroring := &countingPriceMock{}
+	hub.price = erroring
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	hub.Start(ctx)
+	t.Cleanup(hub.Stop)
+
+	<-ctx.Done()
+
+	erroring.mu.Lock()
+	count := erroring.count
+	erroring.mu.Unlock()
+	if count < 2 {
+		t.Fatalf("expected >= 2 Subscribe attempts after error, got %d", count)
+	}
+}
+
+type countingPriceMock struct {
+	mu    sync.Mutex
+	count int
+}
+
+func (m *countingPriceMock) GetPrice(_ context.Context, _ string) (models.AggregatedPrice, error) {
+	return models.AggregatedPrice{}, nil
+}
+func (m *countingPriceMock) Subscribe(_ context.Context, _ []string, _ func(models.AggregatedPrice)) error {
+	m.mu.Lock()
+	m.count++
+	m.mu.Unlock()
+	return errStreamBroken
+}
+func (m *countingPriceMock) Close() error { return nil }
+
+var errStreamBroken = stringErr("stream broken")
+
+type stringErr string
+
+func (s stringErr) Error() string { return string(s) }
+
+func TestSleepWithCtxAbortsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	sleepWithCtx(ctx, time.Hour)
+	if time.Since(start) > 50*time.Millisecond {
+		t.Fatalf("sleepWithCtx should return immediately on cancelled ctx")
+	}
+}
+
 func TestMarshalEnvelopes(t *testing.T) {
 	payload, err := MarshalPrice(models.AggregatedPrice{AssetID: "weth", MedianPrice: 100})
 	if err != nil {

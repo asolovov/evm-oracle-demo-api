@@ -297,6 +297,106 @@ func TestBuildTxOK(t *testing.T) {
 	}
 }
 
+func TestListAssetsAttachesLastOnChain(t *testing.T) {
+	api, _, indexer := newTestAPI()
+	now := time.Now().UTC()
+	indexer.events = []models.Event{{
+		Meta: models.EventMeta{TxHash: "0xfeed", ObservedAt: now},
+		Kind: models.EventKindPriceFulfilled,
+		PriceFulfilled: &models.PriceFulfilledEvent{
+			ReqID: "42", AssetID: aggregatorregistry.AssetIDToBytes32Hex("weth"),
+			Price: "345020000000", RoundID: "7",
+		},
+	}}
+	r := newTestRouter(t, api)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/assets", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		Assets []models.AssetSummary `json:"assets"`
+	}
+	mustJSON(t, rec, &body)
+	var weth *models.AssetSummary
+	for i := range body.Assets {
+		if body.Assets[i].ID == "weth" {
+			weth = &body.Assets[i]
+		}
+	}
+	if weth == nil || weth.LastOnChainPrice != "345020000000" || weth.LastOnChainTx != "0xfeed" {
+		t.Fatalf("LastOnChain* not attached: %+v", weth)
+	}
+}
+
+func TestGetAssetPriceAttachesLastOnChain(t *testing.T) {
+	api, price, indexer := newTestAPI()
+	price.prices["weth"] = models.AggregatedPrice{AssetID: "weth", MedianPrice: 3450.20}
+	now := time.Now().UTC()
+	indexer.events = []models.Event{{
+		Meta: models.EventMeta{TxHash: "0xfeed", ObservedAt: now},
+		Kind: models.EventKindPriceFulfilled,
+		PriceFulfilled: &models.PriceFulfilledEvent{
+			ReqID: "42", AssetID: aggregatorregistry.AssetIDToBytes32Hex("weth"),
+			Price: "345020000000", RoundID: "7",
+		},
+	}}
+	r := newTestRouter(t, api)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/assets/weth/price", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var detail models.PriceDetail
+	mustJSON(t, rec, &detail)
+	if detail.LastOnChainPrice != "345020000000" || detail.LastRoundID != "7" || detail.LastOnChainTx != "0xfeed" {
+		t.Fatalf("LastOnChain* not attached: %+v", detail)
+	}
+}
+
+func TestGetAssetPriceUpstreamErrorReturns502(t *testing.T) {
+	api, price, _ := newTestAPI()
+	price.err = fakeError("price-service died")
+	r := newTestRouter(t, api)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/assets/weth/price", nil))
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("upstream error should 502, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetAssetHistoryUnknownAsset(t *testing.T) {
+	api, _, _ := newTestAPI()
+	r := newTestRouter(t, api)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/assets/doge/history", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown asset history should 404, got %d", rec.Code)
+	}
+}
+
+func TestGetRequestEmptyReqID(t *testing.T) {
+	api, _, _ := newTestAPI()
+	r := newTestRouter(t, api)
+
+	// chi normalises a trailing-slash path; the empty-id case is exercised
+	// here by sending whitespace which the handler trims to "".
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/requests/%20%20", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("whitespace req_id should 400, got %d", rec.Code)
+	}
+}
+
+type fakeError string
+
+func (f fakeError) Error() string { return string(f) }
+
 func TestBuildTxUnresolvedAggregator(t *testing.T) {
 	api, _, _ := newTestAPI()
 	// Drop the WETH entry to simulate the registry not yet seeded.
