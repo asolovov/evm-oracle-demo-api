@@ -1,0 +1,28 @@
+# Service-owned codegen config (architecture rule 9).
+#
+# Codegen targets the protocols/ subtree and writes its output to
+# internal/genproto/. The output directory is gitignored — `make build`
+# (and the multi-stage Dockerfile) re-run codegen on every build so a
+# fresh clone produces a working binary without any committed *.pb.go.
+#
+# `managed` mode retargets the `go_package` baked into the upstream IDL
+# (which points at github.com/asolovov/evm-oracle-demo-protocols/...) so
+# the generated Go sources live under this service's module path. The
+# protocols repo stays language-agnostic; each consumer service owns its
+# own retarget.
+
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/asolovov/evm-oracle-demo-api/internal/genproto
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: internal/genproto
+    opt: paths=source_relative
+  - remote: buf.build/grpc/go
+    out: internal/genproto
+    opt: paths=source_relative
+inputs:
+  - directory: protocols

@@ -1,124 +1,156 @@
 // Package config defines application configuration defaults and schema.
 package config
 
-// GRPCConfig holds gRPC server settings.
-type GRPCConfig struct {
-	Host             string `mapstructure:"host"`
-	Timeout          string `mapstructure:"timeout"`
-	MaxSendMsgSize   int    `mapstructure:"max_send_msg_size"`
-	MaxRecvMsgSize   int    `mapstructure:"max_recv_msg_size"`
-	Port             int    `mapstructure:"port"`
-	NumStreamWorkers uint32 `mapstructure:"num_stream_workers"`
-	Enabled          bool   `mapstructure:"enabled"`
-}
+import (
+	"errors"
+	"fmt"
+)
 
-// GRPCClientConfig holds gRPC client settings for connecting to external services.
-type GRPCClientConfig struct {
-	KeepAlive *KeepAliveConfig `mapstructure:"keep_alive"` // Keep-alive settings
-	Address   string           `mapstructure:"address"`    // External service address (e.g., "user-service:9090")
-	Timeout   string           `mapstructure:"timeout"`    // Request timeout (e.g., "30s")
-	Enabled   bool             `mapstructure:"enabled"`    // Enable gRPC client module
-}
-
-// KeepAliveConfig holds gRPC keep-alive settings.
-type KeepAliveConfig struct {
-	Time                string `mapstructure:"time"`                  // Send pings interval (e.g., "10s")
-	Timeout             string `mapstructure:"timeout"`               // Ping ack timeout (e.g., "1s")
-	PermitWithoutStream bool   `mapstructure:"permit_without_stream"` // Send pings even without active streams
-}
-
-// HTTPConfig holds HTTP server settings.
-type HTTPConfig struct {
-	// Pointers first to reduce padding.
-	CORS       *CORSConfig       `mapstructure:"cors"`       // CORS settings
-	RateLimit  *RateLimitConfig  `mapstructure:"rate_limit"` // Rate limiting
-	Gatekeeper *GatekeeperConfig `mapstructure:"gatekeeper"` // Gatekeeper configuration (JWT validation service)
-
-	Host        string   `mapstructure:"host"`         // Server host (e.g., "0.0.0.0" or "localhost")
-	Timeout     string   `mapstructure:"timeout"`      // Request timeout (e.g., "30s")
-	SwaggerSpec string   `mapstructure:"swagger_spec"` // Path to swagger.yaml
-	AdminEmails []string `mapstructure:"admin_emails"` // Admin user emails for role checking
-	Port        int      `mapstructure:"port"`         // Server port (e.g., 8080)
-
-	Enabled  bool `mapstructure:"enabled"`   // Enable HTTP module
-	MockAuth bool `mapstructure:"mock_auth"` // Enable mock auth for testing (bypasses gatekeeper)
-}
-
-// CORSConfig holds CORS settings.
-type CORSConfig struct {
-	AllowedOrigins []string `mapstructure:"allowed_origins"` // ["*"] or ["https://myapp.com"]
-	AllowedMethods []string `mapstructure:"allowed_methods"` // ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
-	AllowedHeaders []string `mapstructure:"allowed_headers"` // ["*"] or specific headers
-	MaxAge         int      `mapstructure:"max_age"`         // Preflight cache duration in seconds
-	Enabled        bool     `mapstructure:"enabled"`         // Enable CORS middleware
-}
-
-// RateLimitConfig holds rate limiting settings.
-type RateLimitConfig struct {
-	Enabled        bool    `mapstructure:"enabled"`          // Enable rate limiting middleware
-	RequestsPerSec float64 `mapstructure:"requests_per_sec"` // Requests per second (e.g., 100.0)
-	Burst          int     `mapstructure:"burst"`            // Burst size (e.g., 20)
-}
-
-// GatekeeperConfig holds gatekeeper service settings.
-type GatekeeperConfig struct {
-	Address string `mapstructure:"address"` // gRPC address (e.g., "localhost:9091")
-	Timeout string `mapstructure:"timeout"` // Request timeout (e.g., "5s")
-}
-
-// WebSocketConfig holds WebSocket server settings.
-type WebSocketConfig struct {
-	Limits          *WSLimitsConfig `mapstructure:"limits"`            // Connection limits
-	Host            string          `mapstructure:"host"`              // Server host (e.g., "0.0.0.0")
-	Timeout         string          `mapstructure:"timeout"`           // Connection timeout (e.g., "30s")
-	PingInterval    string          `mapstructure:"ping_interval"`     // Ping keepalive interval (e.g., "54s")
-	PongWait        string          `mapstructure:"pong_wait"`         // Pong response timeout (e.g., "60s")
-	WriteWait       string          `mapstructure:"write_wait"`        // Write deadline (e.g., "10s")
-	MaxMessageSize  int64           `mapstructure:"max_message_size"`  // Max message size in bytes
-	Port            int             `mapstructure:"port"`              // Server port (e.g., 8081)
-	ReadBufferSize  int             `mapstructure:"read_buffer_size"`  // Read buffer size in bytes
-	WriteBufferSize int             `mapstructure:"write_buffer_size"` // Write buffer size in bytes
-	Enabled         bool            `mapstructure:"enabled"`           // Enable WebSocket module
-}
-
-// WSLimitsConfig holds WebSocket connection limit settings.
-type WSLimitsConfig struct {
-	MaxConnections        int `mapstructure:"max_connections"`          // Global max connections (0 = unlimited)
-	MaxConnectionsPerRoom int `mapstructure:"max_connections_per_room"` // Per-room max connections (0 = unlimited)
-}
-
-// Scheme represents the application configuration scheme.
+// Scheme is the BFF's configuration scheme. Every nested key is registered in
+// init.go via viper.SetDefault (architecture rule 6: viper.AutomaticEnv alone
+// does not populate nested keys on Unmarshal — every key must be in viper's
+// namespace before load).
 type Scheme struct {
-	// Database configuration for repository module (optional; nil if disabled).
-	Database *DatabaseConfig `mapstructure:"database"`
+	HTTP       HTTPConfig       `mapstructure:"http"`
+	Healthz    HealthzConfig    `mapstructure:"healthz"`
+	Redis      RedisConfig      `mapstructure:"redis"`
+	GRPCClient GRPCClientConfig `mapstructure:"grpc_client"`
+	RateLimit  RateLimitConfig  `mapstructure:"rate_limit"`
+	Author     AuthorConfig     `mapstructure:"author"`
+	Chain      ChainConfig      `mapstructure:"chain"`
+	Telemetry  TelemetryConfig  `mapstructure:"telemetry"`
 
-	// GRPC configuration for gRPC module (optional; nil if disabled).
-	GRPC *GRPCConfig `mapstructure:"grpc"`
-
-	// GRPCClient configuration for gRPC client module (optional; nil if disabled).
-	GRPCClient *GRPCClientConfig `mapstructure:"grpc_client"`
-
-	// HTTP configuration for HTTP module (optional; nil if disabled).
-	HTTP *HTTPConfig `mapstructure:"http"`
-
-	// WebSocket configuration for WebSocket module (optional; nil if disabled).
-	WebSocket *WebSocketConfig `mapstructure:"websocket"`
-
-	// Env is the application environment (e.g. prod, dev, local).
+	// Env is the application environment (e.g. prod, dev, local). Drives
+	// permissive CORS defaults and similar dev-only fallbacks.
 	Env string `mapstructure:"env"`
 }
 
-// DatabaseConfig holds database connection settings.
-type DatabaseConfig struct {
-	Driver          string `mapstructure:"driver"` // postgres, mysql, sqlite
-	Host            string `mapstructure:"host"`
-	Name            string `mapstructure:"name"` // database name
-	User            string `mapstructure:"user"`
-	Password        string `mapstructure:"password"`
-	SSLMode         string `mapstructure:"ssl_mode"` // disable, require, verify-full
-	Port            int    `mapstructure:"port"`
-	MaxOpenConns    int    `mapstructure:"max_open_conns"`
-	MaxIdleConns    int    `mapstructure:"max_idle_conns"`
-	ConnMaxLifetime int    `mapstructure:"conn_max_lifetime"` // seconds
-	Enabled         bool   `mapstructure:"enabled"`
+// HTTPConfig holds the public HTTP listener settings.
+type HTTPConfig struct {
+	Host           string   `mapstructure:"host"`
+	Port           int      `mapstructure:"port"`
+	ReadTimeout    string   `mapstructure:"read_timeout"`
+	WriteTimeout   string   `mapstructure:"write_timeout"`
+	IdleTimeout    string   `mapstructure:"idle_timeout"`
+	CORSOrigins    []string `mapstructure:"cors_origins"`
+	CORSAllowAll   bool     `mapstructure:"cors_allow_all"`
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
+}
+
+// HealthzConfig holds the operator-facing listener settings. Health + metrics
+// run on a dedicated port so they're easy to firewall off from the public LB.
+type HealthzConfig struct {
+	Host string `mapstructure:"host"`
+	Port int    `mapstructure:"port"`
+}
+
+// RedisConfig holds the Redis connection settings for rate-limit + cache state.
+// Redis is the only persistent dependency this service has — there is no
+// relational DB (architecture rule 7 deviation; documented in the README).
+type RedisConfig struct {
+	Addr     string `mapstructure:"addr"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
+}
+
+// GRPCClientConfig holds dial targets for the two upstream services this BFF
+// fans out to. External client wrappers are plain packages, not template
+// modules (architecture rule 5).
+type GRPCClientConfig struct {
+	PriceServiceAddr   string             `mapstructure:"price_service_addr"`
+	IndexerServiceAddr string             `mapstructure:"indexer_service_addr"`
+	DialTimeout        string             `mapstructure:"dial_timeout"`
+	KeepAlive          KeepAliveConfig    `mapstructure:"keep_alive"`
+	UseTLS             bool               `mapstructure:"use_tls"`
+	Subscribe          SubscribeConfig    `mapstructure:"subscribe"`
+}
+
+// KeepAliveConfig holds gRPC keep-alive settings shared by every client.
+type KeepAliveConfig struct {
+	Time                string `mapstructure:"time"`
+	Timeout             string `mapstructure:"timeout"`
+	PermitWithoutStream bool   `mapstructure:"permit_without_stream"`
+}
+
+// SubscribeConfig controls the long-lived streaming subscriptions backing the
+// /ws/stream endpoint.
+type SubscribeConfig struct {
+	// AssetIDs the WS hub subscribes to on price.Subscribe. Empty means
+	// "all configured assets" — the registry of asset IDs lives in
+	// internal/models.
+	AssetIDs []string `mapstructure:"asset_ids"`
+	// ReconnectBackoff controls the upstream-stream re-establish interval
+	// after a transient error.
+	ReconnectBackoff string `mapstructure:"reconnect_backoff"`
+}
+
+// RateLimitConfig holds the IP-based rate-limit settings backed by Redis.
+type RateLimitConfig struct {
+	Enabled           bool `mapstructure:"enabled"`
+	RequestsPerMinute int  `mapstructure:"requests_per_minute"`
+	BurstSize         int  `mapstructure:"burst_size"`
+}
+
+// AuthorConfig surfaces the credential block returned by GET /api/v1/health.
+// Drives the portfolio-surface requirement (FR-09).
+type AuthorConfig struct {
+	Name  string            `mapstructure:"name"`
+	Links map[string]string `mapstructure:"links"`
+}
+
+// ChainConfig holds the per-chain settings the build-tx helper relies on.
+// Single-chain by spec (currently Ethereum Sepolia per the live deployment).
+type ChainConfig struct {
+	ChainID            int64  `mapstructure:"chain_id"`
+	Name               string `mapstructure:"name"`
+	RegistryAddress    string `mapstructure:"registry_address"`
+	ExplorerURLPattern string `mapstructure:"explorer_url_pattern"`
+}
+
+// TelemetryConfig holds the logger + future tracing settings.
+type TelemetryConfig struct {
+	LogLevel  string `mapstructure:"log_level"`
+	LogFormat string `mapstructure:"log_format"`
+}
+
+// Validate fails fast on configuration errors so an orchestrator's crash-loop
+// surfaces a misconfigured key instead of a half-up service.
+func (s *Scheme) Validate() error {
+	var errs []error
+
+	if s.HTTP.Port <= 0 || s.HTTP.Port > 65535 {
+		errs = append(errs, fmt.Errorf("http.port must be between 1 and 65535, got %d", s.HTTP.Port))
+	}
+	if s.Healthz.Port <= 0 || s.Healthz.Port > 65535 {
+		errs = append(errs, fmt.Errorf("healthz.port must be between 1 and 65535, got %d", s.Healthz.Port))
+	}
+	if s.HTTP.Port == s.Healthz.Port {
+		errs = append(errs, fmt.Errorf("http.port and healthz.port must differ (both = %d)", s.HTTP.Port))
+	}
+	if s.Redis.Addr == "" {
+		errs = append(errs, errors.New("redis.addr is required"))
+	}
+	if s.GRPCClient.PriceServiceAddr == "" {
+		errs = append(errs, errors.New("grpc_client.price_service_addr is required"))
+	}
+	if s.GRPCClient.IndexerServiceAddr == "" {
+		errs = append(errs, errors.New("grpc_client.indexer_service_addr is required"))
+	}
+	if s.Chain.ChainID <= 0 {
+		errs = append(errs, errors.New("chain.chain_id is required (e.g. 11155111 for Ethereum Sepolia)"))
+	}
+	if s.Chain.RegistryAddress == "" {
+		errs = append(errs, errors.New("chain.registry_address is required"))
+	}
+	if s.RateLimit.Enabled && s.RateLimit.RequestsPerMinute <= 0 {
+		errs = append(errs, fmt.Errorf("rate_limit.requests_per_minute must be > 0 when enabled, got %d", s.RateLimit.RequestsPerMinute))
+	}
+	if s.Author.Name == "" {
+		// Warn-only by surfacing as a validation error — this keeps the
+		// portfolio surface honest (FR-09). Operators can suppress by
+		// setting AUTHOR_NAME explicitly to whatever they want exposed.
+		errs = append(errs, errors.New("author.name is required (drives the /api/v1/health credential block)"))
+	}
+
+	return errors.Join(errs...)
 }

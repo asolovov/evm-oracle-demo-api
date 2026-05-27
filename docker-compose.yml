@@ -1,48 +1,38 @@
-version: '3.8'
-
 services:
-  postgres:
-    image: postgres:16-alpine
+  redis:
+    image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_PASSWORD: dev
-      POSTGRES_USER: dev
-      POSTGRES_DB: microservice_dev
-    volumes:
-      - ./data/db/postgres:/var/lib/postgresql/data
-
-  migrate:
-    image: migrate/migrate
-    depends_on:
-      - postgres
-    volumes:
-      - ./db/migrations:/migrations
-    command: ["-path=/migrations", "-database", "postgres://dev:dev@postgres:5432/microservice_dev?sslmode=disable", "up"]
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   app:
     build: .
     restart: unless-stopped
     depends_on:
-      - postgres
+      redis:
+        condition: service_healthy
     ports:
-      - "8080:8080"   # HTTP REST API
-      - "9090:9090"   # gRPC
+      - "8080:8080"   # REST + WebSocket
+      - "8081:8081"   # /healthz, /readyz, /metrics
     environment:
-      # Database configuration
-      DATABASE_ENABLED: "true"
-      DATABASE_HOST: postgres
-      DATABASE_PORT: 5432
-      DATABASE_USER: dev
-      DATABASE_PASSWORD: dev
-      DATABASE_NAME: microservice_dev
-      # HTTP REST API configuration
-      HTTP_ENABLED: "true"
       HTTP_HOST: "0.0.0.0"
       HTTP_PORT: 8080
-      HTTP_MOCK_AUTH: "true"  # Bypass JWT validation for local dev
-      # gRPC configuration
-      GRPC_ENABLED: "true"
-      GRPC_HOST: "0.0.0.0"
-      GRPC_PORT: 9090
+      HEALTHZ_HOST: "0.0.0.0"
+      HEALTHZ_PORT: 8081
+      REDIS_ADDR: redis:6379
+      AUTHOR_NAME: "Andrei Solovov"
+      # The two upstream services live on the host's loopback in dev. In a
+      # full docker-compose with price-service + indexer-service alongside
+      # this BFF, override these to "price-service:50051" / "indexer-service:50052".
+      GRPC_CLIENT_PRICE_SERVICE_ADDR: "host.docker.internal:50051"
+      GRPC_CLIENT_INDEXER_SERVICE_ADDR: "host.docker.internal:50052"
+      # Chain defaults match the contracts repo's deployment on Ethereum
+      # Sepolia. Override CHAIN_* if you redeploy.
+      CHAIN_CHAIN_ID: 11155111
+      CHAIN_REGISTRY_ADDRESS: "0x89a6c12a403733c6a817472cec46a530581cb7ef"

@@ -5,87 +5,68 @@ import (
 	"github.com/spf13/viper"
 )
 
-// init initialize default config params.
-//
 //nolint:gochecknoinits // configuration defaults are registered at package load.
 func init() {
 	setDefaults()
 }
 
-// setDefaults exposes default registration for testing.
-// Keep defaults centralized here so tests can reset viper and reapply them.
+// setDefaults registers every nested viper key the BFF reads. Per architecture
+// rule 6 viper.AutomaticEnv alone does not populate nested keys on Unmarshal,
+// so every key must be present in viper's namespace before load — the
+// SetDefault call site doubles as machine-discoverable documentation
+// (`grep "SetDefault" config/` enumerates the entire env-var surface).
 func setDefaults() {
-	// Core application defaults
 	viper.SetDefault("env", "prod")
 
-	// Database/Repository module defaults
-	viper.SetDefault("database.enabled", false)
-	viper.SetDefault("database.driver", "postgres")
-	viper.SetDefault("database.host", "localhost")
-	viper.SetDefault("database.port", 5432)
-	viper.SetDefault("database.ssl_mode", "disable")
-	viper.SetDefault("database.max_open_conns", 25)
-	viper.SetDefault("database.max_idle_conns", 5)
-	viper.SetDefault("database.conn_max_lifetime", 300)
-	viper.SetDefault("database.user", "dev")
-	viper.SetDefault("database.password", "dev")
-	viper.SetDefault("database.name", "microservices_dev")
-
-	// gRPC module defaults
-	viper.SetDefault("grpc.enabled", false)
-	viper.SetDefault("grpc.host", "0.0.0.0")
-	viper.SetDefault("grpc.port", 9090)
-	viper.SetDefault("grpc.timeout", "30s")
-	viper.SetDefault("grpc.max_send_msg_size", 60*1024*1024)
-	viper.SetDefault("grpc.max_recv_msg_size", 60*1024*1024)
-	viper.SetDefault("grpc.num_stream_workers", 0)
-
-	// gRPC Client module defaults
-	viper.SetDefault("grpc_client.enabled", false)
-	viper.SetDefault("grpc_client.address", "localhost:9090")
-	viper.SetDefault("grpc_client.timeout", "30s")
-	viper.SetDefault("grpc_client.keep_alive.time", "10s")
-	viper.SetDefault("grpc_client.keep_alive.timeout", "1s")
-	viper.SetDefault("grpc_client.keep_alive.permit_without_stream", true)
-
-	// HTTP module defaults
-	viper.SetDefault("http.enabled", false)
+	// HTTP listener (public REST + WS surface).
 	viper.SetDefault("http.host", "0.0.0.0")
 	viper.SetDefault("http.port", 8080)
-	viper.SetDefault("http.timeout", "30s")
-	viper.SetDefault("http.swagger_spec", "./api/swagger.yaml")
-	viper.SetDefault("http.mock_auth", false)
-	viper.SetDefault("http.admin_emails", []string{})
+	viper.SetDefault("http.read_timeout", "15s")
+	viper.SetDefault("http.write_timeout", "15s")
+	viper.SetDefault("http.idle_timeout", "60s")
+	viper.SetDefault("http.cors_origins", []string{})
+	viper.SetDefault("http.cors_allow_all", false)
+	viper.SetDefault("http.trusted_proxies", []string{})
 
-	// CORS defaults
-	viper.SetDefault("http.cors.enabled", true)
-	viper.SetDefault("http.cors.allowed_origins", []string{"*"})
-	viper.SetDefault("http.cors.allowed_methods", []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"})
-	viper.SetDefault("http.cors.allowed_headers", []string{"*"})
-	viper.SetDefault("http.cors.max_age", 3600)
+	// Healthz listener (operator-facing — /healthz + /readyz + /metrics).
+	viper.SetDefault("healthz.host", "0.0.0.0")
+	viper.SetDefault("healthz.port", 8081)
 
-	// Rate limit defaults
-	viper.SetDefault("http.rate_limit.enabled", false)
-	viper.SetDefault("http.rate_limit.requests_per_sec", 100.0)
-	viper.SetDefault("http.rate_limit.burst", 20)
+	// Redis (rate limit state + hot-path caches).
+	viper.SetDefault("redis.addr", "localhost:6379")
+	viper.SetDefault("redis.password", "")
+	viper.SetDefault("redis.db", 0)
 
-	// Gatekeeper defaults (for future use)
-	viper.SetDefault("http.gatekeeper.address", "localhost:9091")
-	viper.SetDefault("http.gatekeeper.timeout", "5s")
+	// gRPC client dials for upstream services.
+	viper.SetDefault("grpc_client.price_service_addr", "localhost:50051")
+	viper.SetDefault("grpc_client.indexer_service_addr", "localhost:50052")
+	viper.SetDefault("grpc_client.dial_timeout", "10s")
+	viper.SetDefault("grpc_client.use_tls", false)
+	viper.SetDefault("grpc_client.keep_alive.time", "30s")
+	viper.SetDefault("grpc_client.keep_alive.timeout", "10s")
+	viper.SetDefault("grpc_client.keep_alive.permit_without_stream", true)
+	viper.SetDefault("grpc_client.subscribe.asset_ids", []string{})
+	viper.SetDefault("grpc_client.subscribe.reconnect_backoff", "5s")
 
-	// WebSocket module defaults
-	viper.SetDefault("websocket.enabled", false)
-	viper.SetDefault("websocket.host", "0.0.0.0")
-	viper.SetDefault("websocket.port", 8081)
-	viper.SetDefault("websocket.timeout", "30s")
-	viper.SetDefault("websocket.read_buffer_size", 1024)
-	viper.SetDefault("websocket.write_buffer_size", 1024)
-	viper.SetDefault("websocket.max_message_size", 512000) // 500KB
-	viper.SetDefault("websocket.ping_interval", "54s")
-	viper.SetDefault("websocket.pong_wait", "60s")
-	viper.SetDefault("websocket.write_wait", "10s")
+	// Rate limit defaults match the spec NFR-08 / acceptance criteria.
+	viper.SetDefault("rate_limit.enabled", true)
+	viper.SetDefault("rate_limit.requests_per_minute", 60)
+	viper.SetDefault("rate_limit.burst_size", 10)
 
-	// WebSocket connection limits
-	viper.SetDefault("websocket.limits.max_connections", 0)          // 0 = unlimited
-	viper.SetDefault("websocket.limits.max_connections_per_room", 0) // 0 = unlimited
+	// Credential surface (FR-09). Operators must set AUTHOR_NAME at deploy
+	// time; the rest are optional links rendered next to the author block.
+	viper.SetDefault("author.name", "")
+	viper.SetDefault("author.links", map[string]string{})
+
+	// Chain defaults match the live deployment on Ethereum Sepolia
+	// (chainId 11155111, registry contract from evm-oracle-demo-contracts
+	// main/deployments/ethereum-sepolia/). Override via env to retarget.
+	viper.SetDefault("chain.chain_id", int64(11155111))
+	viper.SetDefault("chain.name", "ethereum-sepolia")
+	viper.SetDefault("chain.registry_address", "0x89a6c12a403733c6a817472cec46a530581cb7ef")
+	viper.SetDefault("chain.explorer_url_pattern", "https://sepolia.etherscan.io/tx/{tx_hash}")
+
+	// Telemetry.
+	viper.SetDefault("telemetry.log_level", "info")
+	viper.SetDefault("telemetry.log_format", "json")
 }

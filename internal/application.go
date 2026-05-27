@@ -3,218 +3,282 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
-	"microservice-template/config"
-	grpcmod "microservice-template/internal/grpc"
-	grpcclientmod "microservice-template/internal/grpcclient"
-	httpmod "microservice-template/internal/http"
-	"microservice-template/internal/module"
-	"microservice-template/internal/repository"
-	"microservice-template/internal/service"
-	wsmod "microservice-template/internal/websocket"
-	"microservice-template/pkg/logger"
-	"microservice-template/pkg/version"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/asolovov/evm-oracle-demo-api/config"
+	"github.com/asolovov/evm-oracle-demo-api/internal/aggregatorregistry"
+	"github.com/asolovov/evm-oracle-demo-api/internal/handlers"
+	"github.com/asolovov/evm-oracle-demo-api/internal/healthz"
+	"github.com/asolovov/evm-oracle-demo-api/internal/indexerclient"
+	"github.com/asolovov/evm-oracle-demo-api/internal/metrics"
+	"github.com/asolovov/evm-oracle-demo-api/internal/module"
+	"github.com/asolovov/evm-oracle-demo-api/internal/priceclient"
+	"github.com/asolovov/evm-oracle-demo-api/internal/ratelimit"
+	"github.com/asolovov/evm-oracle-demo-api/internal/server"
+	"github.com/asolovov/evm-oracle-demo-api/internal/wshub"
+	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
+	"github.com/asolovov/evm-oracle-demo-api/pkg/version"
 )
 
-// App is the main microservice application instance.
+// App is the BFF application instance. Per architecture rules 1+2 every
+// component is constructed and wired here; no module reaches out to others.
 type App struct {
 	config  *config.Scheme
 	version *version.Version
 	modules *module.Manager
 
-	// Services (exposed to transports like HTTP/gRPC)
-	// Will be nil if dependent modules (e.g., repository) are not enabled.
-	svc service.IService
+	priceClient   priceclient.Client
+	indexerClient indexerclient.Client
+	registry      *aggregatorregistry.Registry
+	hub           *wshub.Hub
+	server        *server.Server
+	healthz       *healthz.Server
+	redisClient   redis.UniversalClient
+	metrics       *metrics.Metrics
+
+	wg      sync.WaitGroup
+	stopped sync.Once
 }
 
-// NewApplication creates a new App instance.
-func NewApplication() (app *App, err error) {
+// NewApplication constructs an empty App. Wiring happens in Init.
+func NewApplication() (*App, error) {
 	ver, err := version.NewVersion()
 	if err != nil {
 		return nil, fmt.Errorf("init app version: %w", err)
 	}
 
 	return &App{
-		config:  &config.Scheme{},
-		version: ver,
-		modules: module.NewManager(),
+		config:   &config.Scheme{},
+		version:  ver,
+		modules:  module.NewManager(),
+		registry: aggregatorregistry.New(),
 	}, nil
 }
 
-// Init initializes the application and all registered modules.
+// Init validates config, dials upstream services, seeds the aggregator
+// registry, and constructs the HTTP server.
 func (app *App) Init() error {
-	// Register and initialize modules based on configuration
-	// Note: registerModules handles both registration and initialization
-	// in the correct order to ensure dependencies are available
-	if err := app.registerModules(); err != nil {
-		return fmt.Errorf("register modules: %w", err)
+	if err := app.config.Validate(); err != nil {
+		return fmt.Errorf("config validation: %w", err)
 	}
 
+	pc, err := priceclient.Dial(app.config.GRPCClient)
+	if err != nil {
+		return fmt.Errorf("price client: %w", err)
+	}
+	app.priceClient = pc
+
+	ix, err := indexerclient.Dial(app.config.GRPCClient)
+	if err != nil {
+		// Tear down the price client before bubbling the error so a
+		// later restart isn't holding a dangling conn.
+		_ = pc.Close()
+		return fmt.Errorf("indexer client: %w", err)
+	}
+	app.indexerClient = ix
+
+	// Best-effort registry seed. The BFF must come up even if the
+	// indexer is temporarily unreachable — build-tx returns 503 until the
+	// registry has the aggregator address. The WS hub will refresh on
+	// live AssetRegistered events in a later commit.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := app.registry.Load(ctx, ix); err != nil {
+		logger.Log().WithError(err).Warn("aggregator registry: initial load failed (will retry on first live event)")
+	}
+
+	// Metrics — constructed before the hub so the hub's OnSend / OnDrop
+	// callbacks can reference the counters. WSConnectionCount is wired
+	// post-hub-construction below.
+	app.metrics = metrics.New(metrics.Options{
+		WSConnectionCount: func() float64 { return 0 },
+	})
+
+	api := &handlers.API{
+		Price:            app.priceClient,
+		Indexer:          app.indexerClient,
+		Registry:         app.registry,
+		Author:           app.config.Author,
+		Chain:            app.config.Chain,
+		Version:          app.Version(),
+		ServiceID:        "evm-oracle-demo-api",
+		GlobalMiddleware: []func(http.Handler) http.Handler{app.metrics.Middleware()},
+	}
+
+	app.redisClient = redis.NewClient(&redis.Options{
+		Addr:     app.config.Redis.Addr,
+		Password: app.config.Redis.Password,
+		DB:       app.config.Redis.DB,
+	})
+
+	var apiMW []func(http.Handler) http.Handler
+	if app.config.RateLimit.Enabled {
+		limiter := ratelimit.NewRedisLimiter(app.redisClient, app.config.RateLimit.RequestsPerMinute, app.config.RateLimit.BurstSize)
+		// /api/v1/health is operator-facing and never rate-limited so a
+		// crashed Redis can't blackhole readiness checks.
+		apiMW = append(apiMW, ratelimit.Middleware(
+			limiter,
+			app.config.HTTP.TrustedProxies,
+			[]string{"/api/v1/health"},
+			func(ipClass string) { app.metrics.RateLimitRejectedTotal.WithLabelValues(ipClass).Inc() },
+		))
+	}
+
+	srv, err := server.New(app.config.HTTP, api, apiMW...)
+	if err != nil {
+		_ = pc.Close()
+		_ = ix.Close()
+		_ = app.redisClient.Close()
+		return fmt.Errorf("http server: %w", err)
+	}
+	app.server = srv
+
+	app.hub = wshub.NewHub(
+		app.config.GRPCClient,
+		app.priceClient,
+		app.indexerClient,
+		app.registry,
+		wshub.Options{
+			OnSend: func() { app.metrics.WSMessagesSentTotal.Inc() },
+			OnDrop: func() { app.metrics.WSDropsTotal.Inc() },
+		},
+	)
+	app.server.HandleWebSocket(app.hub.Serve)
+
+	// Re-construct the metrics layer with a real ws_connections_active
+	// gauge function now that we have the hub instance. The previous
+	// `metrics.New(...)` was a bootstrap with a zero gauge — its
+	// counters are still in use, so we keep the same registry and only
+	// rewire the gauge by replacing the struct.
+	hub := app.hub
+	app.metrics = metrics.New(metrics.Options{
+		WSConnectionCount: func() float64 { return float64(hub.ClientCount()) },
+	})
+
+	hz, err := healthz.New(
+		app.config.Healthz,
+		app.metrics.Registry,
+		"evm-oracle-demo-api",
+		app.Version(),
+		nil,
+	)
+	if err != nil {
+		_ = pc.Close()
+		_ = ix.Close()
+		_ = app.redisClient.Close()
+		return fmt.Errorf("healthz server: %w", err)
+	}
+	app.healthz = hz
+
+	logger.Log().Info("application initialized")
 	return nil
 }
 
-// registerModules registers enabled modules based on configuration.
-// Modules are registered in dependency order:
-// 1. Infrastructure (database, cache, queue).
-// 2. Business logic (repositories, services).
-// 3. Transport (http, grpc).
-//
-//nolint:gocyclo // should decompose later
-func (app *App) registerModules() error {
-	// 1. Infrastructure: Repository (database-backed) is optional
-	var repoModule *repository.Module
-	if app.config.Database != nil && app.config.Database.Enabled {
-		logger.Log().Info("database enabled, registering repository module")
-
-		repoModule = repository.NewModule(app.config.Database)
-		app.modules.Register(repoModule)
-	}
-
-	// 2. Infrastructure: gRPC Client for external services (optional)
-	var grpcClientModule *grpcclientmod.Module
-	if app.config.GRPCClient != nil && app.config.GRPCClient.Enabled {
-		logger.Log().Info("grpc_client enabled, registering grpc client module")
-
-		grpcClientModule = grpcclientmod.NewModule(app.config.GRPCClient)
-		app.modules.Register(grpcClientModule)
-	}
-
-	// 3. Business logic: Service module is always registered; repository may be nil
-	logger.Log().Info("registering service module")
-
-	// Pass repository module as provider; service will retrieve repository during Init
-	// (after repository module has been initialized).
-	// Explicitly pass nil to avoid typed nil interface gotcha.
-	var repoProvider service.RepositoryProvider
-	if repoModule != nil {
-		repoProvider = repoModule
-	}
-	svcModule := service.NewModule(repoProvider)
-	app.modules.Register(svcModule)
-
-	// Initialize infrastructure and business logic modules first
-	// so we can retrieve the service instance for transport modules
-	ctx := context.Background()
-	if repoModule != nil {
-		if err := repoModule.Init(ctx); err != nil {
-			return fmt.Errorf("init repository module: %w", err)
-		}
-	}
-	if grpcClientModule != nil {
-		if err := grpcClientModule.Init(ctx); err != nil {
-			return fmt.Errorf("init grpc client module: %w", err)
-		}
-	}
-	if err := svcModule.Init(ctx); err != nil {
-		return fmt.Errorf("init service module: %w", err)
-	}
-
-	// Capture service instance after initialization
-	app.svc = svcModule.Service()
-
-	logger.Log().Info("infrastructure modules initialized successfully")
-
-	// 4. Transport: HTTP module (optional) - receives both service AND grpcClient
-	if app.config.HTTP != nil && app.config.HTTP.Enabled {
-		logger.Log().Info("http enabled, registering http module")
-
-		// Pass grpcClient to HTTP module (can be nil)
-		httpModule := httpmod.NewModule(app.config.HTTP, app.svc, grpcClientModule)
-		app.modules.Register(httpModule)
-
-		// Initialize HTTP module
-		if err := httpModule.Init(ctx); err != nil {
-			return fmt.Errorf("init http module: %w", err)
-		}
-	}
-
-	// 5. Transport: gRPC server module (optional)
-	if app.config.GRPC != nil && app.config.GRPC.Enabled {
-		logger.Log().Info("grpc enabled, registering grpc module")
-
-		grpcModule := grpcmod.NewModule(app.config.GRPC, app.svc)
-		app.modules.Register(grpcModule)
-
-		// Initialize gRPC module
-		if err := grpcModule.Init(ctx); err != nil {
-			return fmt.Errorf("init grpc module: %w", err)
-		}
-	}
-
-	// 6. Transport: WebSocket server module (optional)
-	if app.config.WebSocket != nil && app.config.WebSocket.Enabled {
-		logger.Log().Info("websocket enabled, registering websocket module")
-
-		wsModule := wsmod.NewModule(app.config.WebSocket, app.svc)
-		app.modules.Register(wsModule)
-
-		// Initialize WebSocket module
-		if err := wsModule.Init(ctx); err != nil {
-			return fmt.Errorf("init websocket module: %w", err)
-		}
-	}
-
-	logger.Log().Infof("registered and initialized %d modules", app.modules.Count())
-	return nil
-}
-
-// Serve starts all modules and waits for shutdown signal.
+// Serve runs the listener in a background goroutine and blocks until a
+// shutdown signal arrives.
 func (app *App) Serve() error {
-	ctx := context.Background()
-
-	// Start all modules
-	if err := app.modules.StartAll(ctx); err != nil {
-		return fmt.Errorf("start modules: %w", err)
+	if app.server == nil {
+		return errors.New("Serve called before Init")
 	}
+
+	// Hub goroutines run independently of the http.Server lifecycle —
+	// Stop() drains them via Hub.Stop after the listener shuts down.
+	app.hub.Start(context.Background())
+
+	app.wg.Add(1)
+	errCh := make(chan error, 1)
+	go func() {
+		defer app.wg.Done()
+		if err := app.server.Serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+
+	app.wg.Add(1)
+	go func() {
+		defer app.wg.Done()
+		if err := app.healthz.Serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
 
 	logger.Log().Info("application is running, press Ctrl+C to stop")
 
-	// Wait for shutdown signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
-	<-quit
-	logger.Log().Info("shutdown signal received, stopping gracefully...")
-
+	select {
+	case <-quit:
+		logger.Log().Info("shutdown signal received, stopping gracefully...")
+	case err := <-errCh:
+		return fmt.Errorf("http listener: %w", err)
+	}
 	return nil
 }
 
-// Stop gracefully shuts down all modules.
+// Stop tears down listeners + upstream clients with a bounded deadline.
+//
+//nolint:gocognit // Shutdown intentionally walks every owned resource and
+// records the first error; flattening helpers would obscure the order.
 func (app *App) Stop() error {
-	// Create context with timeout for graceful shutdown
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	var firstErr error
+	app.stopped.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
-	return app.modules.StopAll(ctx)
+		if app.server != nil {
+			if err := app.server.Shutdown(ctx); err != nil {
+				logger.Log().WithError(err).Warn("server shutdown error")
+				firstErr = err
+			}
+		}
+		if app.healthz != nil {
+			if err := app.healthz.Shutdown(ctx); err != nil && firstErr == nil {
+				logger.Log().WithError(err).Warn("healthz shutdown error")
+				firstErr = err
+			}
+		}
+		if app.hub != nil {
+			app.hub.Stop()
+		}
+		app.wg.Wait()
+
+		if app.priceClient != nil {
+			if err := app.priceClient.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		if app.indexerClient != nil {
+			if err := app.indexerClient.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		if app.redisClient != nil {
+			if err := app.redisClient.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		if err := app.modules.StopAll(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	})
+	return firstErr
 }
 
-// Config returns the application configuration.
-func (app *App) Config() *config.Scheme {
-	return app.config
-}
+// Config exposes the config scheme.
+func (app *App) Config() *config.Scheme { return app.config }
 
-// Version returns the application version string.
-func (app *App) Version() string {
-	return app.version.String()
-}
+// Version returns the version string.
+func (app *App) Version() string { return app.version.String() }
 
-// Modules returns the module manager (useful for health checks).
-func (app *App) Modules() *module.Manager {
-	return app.modules
-}
-
-// Service returns the service instance.
-// Service is always registered; methods may fail if dependencies are unavailable.
-func (app *App) Service() service.IService {
-	return app.svc
-}
-
-// CreateAddr creates an address string from host and port.
-func CreateAddr(host string, port int) string {
-	return fmt.Sprintf("%s:%v", host, port)
-}
+// Modules exposes the module manager (used by healthchecks).
+func (app *App) Modules() *module.Manager { return app.modules }

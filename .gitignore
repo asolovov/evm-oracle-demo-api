@@ -18,27 +18,16 @@
 
 __debug_bin
 
-microservice-template
+# Service binary (matches APP in the Makefile)
+evm-oracle-demo-api
 
-# Template synchronization metadata (only in downstream repos)
-.template-version
-
-# TODO: add any required ignore patterns here
-
-# Generated protobuf outputs (kept locally, not committed)
-*.pb.go
-*_grpc.pb.go
-
-# Generated swagger/HTTP API code (kept locally, not committed)
-internal/http/server/
-internal/http/models/
+# Generated protobuf outputs land under internal/genproto/ and are never
+# committed (rule 9). The Dockerfile + Makefile regenerate them at build time.
+internal/genproto/
 
 # Local docker-compose data
 /data/
 
+# Local env files
 .env
-
-local
-
-
-microservice-template
+.env.local
