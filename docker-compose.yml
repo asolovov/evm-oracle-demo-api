@@ -5,17 +5,34 @@ services:
     ports:
       - "6379:6379"
     command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   app:
     build: .
     restart: unless-stopped
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     ports:
       - "8080:8080"   # REST + WebSocket
+      - "8081:8081"   # /healthz, /readyz, /metrics
     environment:
       HTTP_HOST: "0.0.0.0"
       HTTP_PORT: 8080
+      HEALTHZ_HOST: "0.0.0.0"
+      HEALTHZ_PORT: 8081
       REDIS_ADDR: redis:6379
-      # PriceServiceAddr / IndexerServiceAddr default to localhost — override
-      # in a real environment so the BFF can reach the upstream services.
+      AUTHOR_NAME: "Andrei Solovov"
+      # The two upstream services live on the host's loopback in dev. In a
+      # full docker-compose with price-service + indexer-service alongside
+      # this BFF, override these to "price-service:50051" / "indexer-service:50052".
+      GRPC_CLIENT_PRICE_SERVICE_ADDR: "host.docker.internal:50051"
+      GRPC_CLIENT_INDEXER_SERVICE_ADDR: "host.docker.internal:50052"
+      # Chain defaults match the contracts repo's deployment on Ethereum
+      # Sepolia. Override CHAIN_* if you redeploy.
+      CHAIN_CHAIN_ID: 11155111
+      CHAIN_REGISTRY_ADDRESS: "0x89a6c12a403733c6a817472cec46a530581cb7ef"
