@@ -72,8 +72,13 @@ clean:
 lint: proto-gen
 	golangci-lint run ./...
 
+# Pinned v2 — the config in .golangci.yml uses the v2 schema; @latest on the
+# v1 module path (which is what `golangci/golangci-lint/cmd/...` still maps to)
+# silently keeps you on v1 and the v2 config fails to load.
+GOLANGCI_LINT_VERSION := v2.1.6
+
 lint-install:
-	@which golangci-lint > /dev/null || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
+	@which golangci-lint > /dev/null || (echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..." && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION))
 
 # --- Protobuf codegen --------------------------------------------------------
 # Architecture rule 9: codegen is service-owned. The protocols/ subtree carries
