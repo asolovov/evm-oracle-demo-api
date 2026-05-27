@@ -48,7 +48,7 @@ func (a *API) Health(w http.ResponseWriter, _ *http.Request) {
 }
 
 // ListAssets serves GET /api/v1/assets. Joins the static catalog with the
-// latest aggregated price + last on-chain fulfilment per asset. Upstream
+// latest aggregated price + last on-chain fulfillment per asset. Upstream
 // failures degrade gracefully — a missing price simply leaves the field out
 // of the response so the dashboard can still render the tile.
 func (a *API) ListAssets(w http.ResponseWriter, r *http.Request) {

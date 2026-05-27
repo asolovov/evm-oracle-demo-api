@@ -1,5 +1,5 @@
 // Package grpcdial owns the shared dial-option construction the BFF's two
-// upstream clients (price-service, indexer-service) reuse. Centralising the
+// upstream clients (price-service, indexer-service) reuse. Centralizing the
 // keepalive / TLS / timeout policy keeps the two clients consistent.
 package grpcdial
 

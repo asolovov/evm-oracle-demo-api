@@ -25,7 +25,7 @@ func (s *statusRecorder) WriteHeader(code int) {
 
 // AccessLog emits a single structured log line per request after the handler
 // returns. Status defaults to 200 when the handler omits an explicit
-// WriteHeader (mirroring net/http's own behaviour).
+// WriteHeader (mirroring net/http's own behavior).
 func AccessLog() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

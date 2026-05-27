@@ -28,7 +28,7 @@ type WireMessage struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-// MarshalPrice serialises an AggregatedPrice into the wire envelope.
+// MarshalPrice serializes an AggregatedPrice into the wire envelope.
 func MarshalPrice(p models.AggregatedPrice) ([]byte, error) {
 	payload, err := json.Marshal(p)
 	if err != nil {
@@ -37,7 +37,7 @@ func MarshalPrice(p models.AggregatedPrice) ([]byte, error) {
 	return json.Marshal(WireMessage{Type: MessageTypePrice, Payload: payload})
 }
 
-// MarshalEvent serialises an Event into the wire envelope.
+// MarshalEvent serializes an Event into the wire envelope.
 func MarshalEvent(e models.Event) ([]byte, error) {
 	payload, err := json.Marshal(e)
 	if err != nil {

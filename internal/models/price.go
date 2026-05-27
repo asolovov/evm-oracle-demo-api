@@ -54,7 +54,7 @@ func AggregatedPriceFromProto(p *pricev1.AggregatedPrice) AggregatedPrice {
 
 // AssetSummary is the per-tile entry returned by GET /api/v1/assets. It
 // merges static catalog metadata with the latest aggregated price + last
-// observed on-chain fulfilment.
+// observed on-chain fulfillment.
 type AssetSummary struct {
 	Asset
 	LatestPrice      *AggregatedPrice `json:"latest_price,omitempty"`

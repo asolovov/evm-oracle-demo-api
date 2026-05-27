@@ -272,7 +272,7 @@ func TestSleepWithCtxAbortsOnCancel(t *testing.T) {
 	start := time.Now()
 	sleepWithCtx(ctx, time.Hour)
 	if time.Since(start) > 50*time.Millisecond {
-		t.Fatalf("sleepWithCtx should return immediately on cancelled ctx")
+		t.Fatalf("sleepWithCtx should return immediately on canceled ctx")
 	}
 }
 

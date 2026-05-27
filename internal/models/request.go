@@ -9,6 +9,7 @@ import (
 // RequestStatusKind mirrors indexer.v1.RequestStatus.Status.
 type RequestStatusKind string
 
+// RequestStatus* — the indexer's lifecycle states for a price-request id.
 const (
 	RequestStatusUnspecified RequestStatusKind = ""
 	RequestStatusPending     RequestStatusKind = "pending"
@@ -28,6 +29,8 @@ func RequestStatusFromProto(s indexerv1.RequestStatus_Status) RequestStatusKind 
 		return RequestStatusFulfilled
 	case indexerv1.RequestStatus_STATUS_FAILED:
 		return RequestStatusFailed
+	case indexerv1.RequestStatus_STATUS_UNSPECIFIED:
+		return RequestStatusUnspecified
 	default:
 		return RequestStatusUnspecified
 	}

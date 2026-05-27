@@ -9,6 +9,7 @@ import (
 // EventKind discriminates the contract-emitted events the indexer surfaces.
 type EventKind string
 
+// EventKind* — the contract-emitted event discriminators the BFF understands.
 const (
 	EventKindUnspecified     EventKind = ""
 	EventKindPriceRequested  EventKind = "PRICE_REQUESTED"
@@ -28,6 +29,8 @@ func EventKindFromProto(k indexerv1.EventKind) EventKind {
 		return EventKindPriceFulfilled
 	case indexerv1.EventKind_EVENT_KIND_ASSET_REGISTERED:
 		return EventKindAssetRegistered
+	case indexerv1.EventKind_EVENT_KIND_UNSPECIFIED:
+		return EventKindUnspecified
 	default:
 		return EventKindUnspecified
 	}
@@ -42,6 +45,8 @@ func EventKindToProto(k EventKind) indexerv1.EventKind {
 		return indexerv1.EventKind_EVENT_KIND_PRICE_FULFILLED
 	case EventKindAssetRegistered:
 		return indexerv1.EventKind_EVENT_KIND_ASSET_REGISTERED
+	case EventKindUnspecified:
+		return indexerv1.EventKind_EVENT_KIND_UNSPECIFIED
 	default:
 		return indexerv1.EventKind_EVENT_KIND_UNSPECIFIED
 	}
