@@ -24,13 +24,14 @@ import (
 // API holds the dependencies every handler shares. Constructed once in
 // application.go and registered on the chi router.
 type API struct {
-	Price     priceclient.Client
-	Indexer   indexerclient.Client
-	Registry  *aggregatorregistry.Registry
-	Author    config.AuthorConfig
-	Chain     config.ChainConfig
-	Version   string
-	ServiceID string
+	Price            priceclient.Client
+	Indexer          indexerclient.Client
+	Registry         *aggregatorregistry.Registry
+	Author           config.AuthorConfig
+	Chain            config.ChainConfig
+	Version          string
+	ServiceID        string
+	GlobalMiddleware []func(http.Handler) http.Handler
 }
 
 // Health serves GET /api/v1/health.

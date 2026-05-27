@@ -9,10 +9,14 @@ import (
 	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
 )
 
+// OnReject fires for each 429-emitted request. The metrics package wires this
+// to ratelimit_rejected_total.
+type OnReject func(ipClass string)
+
 // Middleware enforces the supplied Limiter per ClientIP. Bypassed paths skip
 // the check entirely — useful for /api/v1/health which should always answer
-// regardless of upstream traffic.
-func Middleware(limiter Limiter, trustedProxies []string, bypass []string) func(http.Handler) http.Handler {
+// regardless of upstream traffic. onReject is optional.
+func Middleware(limiter Limiter, trustedProxies []string, bypass []string, onReject ...OnReject) func(http.Handler) http.Handler {
 	bypassSet := make(map[string]struct{}, len(bypass))
 	for _, p := range bypass {
 		bypassSet[strings.TrimRight(p, "/")] = struct{}{}
@@ -39,6 +43,11 @@ func Middleware(limiter Limiter, trustedProxies []string, bypass []string) func(
 			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(decision.Remaining))
 
 			if !decision.Allowed {
+				for _, cb := range onReject {
+					if cb != nil {
+						cb("any")
+					}
+				}
 				w.Header().Set("Retry-After", strconv.Itoa(int(decision.RetryAfter.Seconds())))
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.WriteHeader(http.StatusTooManyRequests)

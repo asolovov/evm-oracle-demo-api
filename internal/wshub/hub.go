@@ -33,12 +33,20 @@ type Hub struct {
 
 	dropMu sync.Mutex
 	drops  uint64
+
+	onSend func()
+	onDrop func()
 }
 
 // Options carries the construction parameters that can't be derived from
 // config alone.
 type Options struct {
 	ClientBufferSize int
+	// OnSend fires once per fan-out broadcast (one increment per frame
+	// delivered to any client). Used by the metrics package.
+	OnSend func()
+	// OnDrop fires once per slow-consumer drop.
+	OnDrop func()
 }
 
 // NewHub constructs an unstarted Hub.
@@ -60,6 +68,8 @@ func NewHub(
 		registry:         registry,
 		clientBufferSize: buf,
 		clients:          make(map[*Client]struct{}),
+		onSend:           opts.OnSend,
+		onDrop:           opts.OnDrop,
 	}
 }
 
@@ -151,10 +161,16 @@ func (h *Hub) broadcast(payload []byte) {
 	for _, c := range snapshot {
 		select {
 		case c.send <- payload:
+			if h.onSend != nil {
+				h.onSend()
+			}
 		default:
 			h.dropMu.Lock()
 			h.drops++
 			h.dropMu.Unlock()
+			if h.onDrop != nil {
+				h.onDrop()
+			}
 			c.close()
 		}
 	}

@@ -17,7 +17,9 @@ import (
 	"github.com/asolovov/evm-oracle-demo-api/config"
 	"github.com/asolovov/evm-oracle-demo-api/internal/aggregatorregistry"
 	"github.com/asolovov/evm-oracle-demo-api/internal/handlers"
+	"github.com/asolovov/evm-oracle-demo-api/internal/healthz"
 	"github.com/asolovov/evm-oracle-demo-api/internal/indexerclient"
+	"github.com/asolovov/evm-oracle-demo-api/internal/metrics"
 	"github.com/asolovov/evm-oracle-demo-api/internal/module"
 	"github.com/asolovov/evm-oracle-demo-api/internal/priceclient"
 	"github.com/asolovov/evm-oracle-demo-api/internal/ratelimit"
@@ -39,7 +41,9 @@ type App struct {
 	registry      *aggregatorregistry.Registry
 	hub           *wshub.Hub
 	server        *server.Server
+	healthz       *healthz.Server
 	redisClient   redis.UniversalClient
+	metrics       *metrics.Metrics
 
 	wg      sync.WaitGroup
 	stopped sync.Once
@@ -92,14 +96,22 @@ func (app *App) Init() error {
 		logger.Log().WithError(err).Warn("aggregator registry: initial load failed (will retry on first live event)")
 	}
 
+	// Metrics — constructed before the hub so the hub's OnSend / OnDrop
+	// callbacks can reference the counters. WSConnectionCount is wired
+	// post-hub-construction below.
+	app.metrics = metrics.New(metrics.Options{
+		WSConnectionCount: func() float64 { return 0 },
+	})
+
 	api := &handlers.API{
-		Price:     app.priceClient,
-		Indexer:   app.indexerClient,
-		Registry:  app.registry,
-		Author:    app.config.Author,
-		Chain:     app.config.Chain,
-		Version:   app.Version(),
-		ServiceID: "evm-oracle-demo-api",
+		Price:            app.priceClient,
+		Indexer:          app.indexerClient,
+		Registry:         app.registry,
+		Author:           app.config.Author,
+		Chain:            app.config.Chain,
+		Version:          app.Version(),
+		ServiceID:        "evm-oracle-demo-api",
+		GlobalMiddleware: []func(http.Handler) http.Handler{app.metrics.Middleware()},
 	}
 
 	app.redisClient = redis.NewClient(&redis.Options{
@@ -113,7 +125,12 @@ func (app *App) Init() error {
 		limiter := ratelimit.NewRedisLimiter(app.redisClient, app.config.RateLimit.RequestsPerMinute, app.config.RateLimit.BurstSize)
 		// /api/v1/health is operator-facing and never rate-limited so a
 		// crashed Redis can't blackhole readiness checks.
-		apiMW = append(apiMW, ratelimit.Middleware(limiter, app.config.HTTP.TrustedProxies, []string{"/api/v1/health"}))
+		apiMW = append(apiMW, ratelimit.Middleware(
+			limiter,
+			app.config.HTTP.TrustedProxies,
+			[]string{"/api/v1/health"},
+			func(ipClass string) { app.metrics.RateLimitRejectedTotal.WithLabelValues(ipClass).Inc() },
+		))
 	}
 
 	srv, err := server.New(app.config.HTTP, api, apiMW...)
@@ -125,8 +142,42 @@ func (app *App) Init() error {
 	}
 	app.server = srv
 
-	app.hub = wshub.NewHub(app.config.GRPCClient, app.priceClient, app.indexerClient, app.registry, wshub.Options{})
+	app.hub = wshub.NewHub(
+		app.config.GRPCClient,
+		app.priceClient,
+		app.indexerClient,
+		app.registry,
+		wshub.Options{
+			OnSend: func() { app.metrics.WSMessagesSentTotal.Inc() },
+			OnDrop: func() { app.metrics.WSDropsTotal.Inc() },
+		},
+	)
 	app.server.HandleWebSocket(app.hub.Serve)
+
+	// Re-construct the metrics layer with a real ws_connections_active
+	// gauge function now that we have the hub instance. The previous
+	// `metrics.New(...)` was a bootstrap with a zero gauge — its
+	// counters are still in use, so we keep the same registry and only
+	// rewire the gauge by replacing the struct.
+	hub := app.hub
+	app.metrics = metrics.New(metrics.Options{
+		WSConnectionCount: func() float64 { return float64(hub.ClientCount()) },
+	})
+
+	hz, err := healthz.New(
+		app.config.Healthz,
+		app.metrics.Registry,
+		"evm-oracle-demo-api",
+		app.Version(),
+		nil,
+	)
+	if err != nil {
+		_ = pc.Close()
+		_ = ix.Close()
+		_ = app.redisClient.Close()
+		return fmt.Errorf("healthz server: %w", err)
+	}
+	app.healthz = hz
 
 	logger.Log().Info("application initialised")
 	return nil
@@ -148,6 +199,14 @@ func (app *App) Serve() error {
 	go func() {
 		defer app.wg.Done()
 		if err := app.server.Serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+
+	app.wg.Add(1)
+	go func() {
+		defer app.wg.Done()
+		if err := app.healthz.Serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
@@ -176,6 +235,12 @@ func (app *App) Stop() error {
 		if app.server != nil {
 			if err := app.server.Shutdown(ctx); err != nil {
 				logger.Log().WithError(err).Warn("server shutdown error")
+				firstErr = err
+			}
+		}
+		if app.healthz != nil {
+			if err := app.healthz.Shutdown(ctx); err != nil && firstErr == nil {
+				logger.Log().WithError(err).Warn("healthz shutdown error")
 				firstErr = err
 			}
 		}
