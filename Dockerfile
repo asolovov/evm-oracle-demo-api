@@ -2,7 +2,7 @@
 
 # Codegen toolchain pinned to match the Makefile so a `docker build` produces
 # identical generated output to a local `make build`.
-ARG GO_VERSION=1.24
+ARG GO_VERSION=1.25
 ARG BUF_VERSION=v1.55.0
 ARG PROTOC_GEN_GO_VERSION=v1.36.0
 ARG PROTOC_GEN_GRPC_VERSION=v1.5.1
