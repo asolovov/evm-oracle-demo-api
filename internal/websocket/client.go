@@ -7,7 +7,7 @@ import (
 	"github.com/gofrs/uuid"
 	"github.com/gorilla/websocket"
 
-	"microservice-template/pkg/logger"
+	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
 )
 
 // Client represents a single WebSocket connection.

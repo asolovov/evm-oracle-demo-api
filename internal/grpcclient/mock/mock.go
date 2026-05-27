@@ -6,8 +6,8 @@ import (
 
 	"github.com/gofrs/uuid"
 
-	"microservice-template/internal/grpcclient"
-	"microservice-template/internal/models"
+	"github.com/asolovov/evm-oracle-demo-api/internal/grpcclient"
+	"github.com/asolovov/evm-oracle-demo-api/internal/models"
 )
 
 // GRPCClient is a mock implementation of grpcclient.IClient for testing.

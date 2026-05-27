@@ -9,9 +9,9 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"microservice-template/config"
-	"microservice-template/internal/service"
-	"microservice-template/pkg/logger"
+	"github.com/asolovov/evm-oracle-demo-api/config"
+	"github.com/asolovov/evm-oracle-demo-api/internal/service"
+	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
 )
 
 // Server is the WebSocket HTTP server.

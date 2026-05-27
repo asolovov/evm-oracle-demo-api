@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"microservice-template/config"
-	"microservice-template/internal/grpc/handlers"
-	"microservice-template/internal/service"
-	"microservice-template/pkg/logger"
-	proto "microservice-template/protocols/userservice"
+	"github.com/asolovov/evm-oracle-demo-api/config"
+	"github.com/asolovov/evm-oracle-demo-api/internal/grpc/handlers"
+	"github.com/asolovov/evm-oracle-demo-api/internal/service"
+	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
+	proto "github.com/asolovov/evm-oracle-demo-api/protocols/userservice"
 )
 
 // Module implements module.Module interface for gRPC server.

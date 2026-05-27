@@ -4,10 +4,10 @@ package main
 import (
 	"os"
 
-	"microservice-template/cmd/root"
-	"microservice-template/cmd/serve"
-	"microservice-template/internal"
-	"microservice-template/pkg/logger"
+	"github.com/asolovov/evm-oracle-demo-api/cmd/root"
+	"github.com/asolovov/evm-oracle-demo-api/cmd/serve"
+	"github.com/asolovov/evm-oracle-demo-api/internal"
+	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
 )
 
 // main is the entry point of the application.

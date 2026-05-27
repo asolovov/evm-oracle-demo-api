@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"microservice-template/config"
+	"github.com/asolovov/evm-oracle-demo-api/config"
 )
 
 func TestRecovery(t *testing.T) {

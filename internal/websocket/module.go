@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"microservice-template/config"
-	"microservice-template/internal/service"
-	"microservice-template/pkg/logger"
+	"github.com/asolovov/evm-oracle-demo-api/config"
+	"github.com/asolovov/evm-oracle-demo-api/internal/service"
+	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
 )
 
 // Module implements the module.Module interface for WebSocket server.

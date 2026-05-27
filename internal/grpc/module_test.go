@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"microservice-template/config"
+	"github.com/asolovov/evm-oracle-demo-api/config"
 )
 
 func TestModule_Lifecycle(t *testing.T) {

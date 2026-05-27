@@ -9,16 +9,16 @@ import (
 	"syscall"
 	"time"
 
-	"microservice-template/config"
-	grpcmod "microservice-template/internal/grpc"
-	grpcclientmod "microservice-template/internal/grpcclient"
-	httpmod "microservice-template/internal/http"
-	"microservice-template/internal/module"
-	"microservice-template/internal/repository"
-	"microservice-template/internal/service"
-	wsmod "microservice-template/internal/websocket"
-	"microservice-template/pkg/logger"
-	"microservice-template/pkg/version"
+	"github.com/asolovov/evm-oracle-demo-api/config"
+	grpcmod "github.com/asolovov/evm-oracle-demo-api/internal/grpc"
+	grpcclientmod "github.com/asolovov/evm-oracle-demo-api/internal/grpcclient"
+	httpmod "github.com/asolovov/evm-oracle-demo-api/internal/http"
+	"github.com/asolovov/evm-oracle-demo-api/internal/module"
+	"github.com/asolovov/evm-oracle-demo-api/internal/repository"
+	"github.com/asolovov/evm-oracle-demo-api/internal/service"
+	wsmod "github.com/asolovov/evm-oracle-demo-api/internal/websocket"
+	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
+	"github.com/asolovov/evm-oracle-demo-api/pkg/version"
 )
 
 // App is the main microservice application instance.

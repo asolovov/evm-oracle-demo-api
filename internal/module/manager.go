@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"microservice-template/pkg/logger"
+	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
 )
 
 // Manager orchestrates the lifecycle of registered modules.

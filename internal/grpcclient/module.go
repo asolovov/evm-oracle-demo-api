@@ -10,11 +10,11 @@ import (
 	"github.com/gofrs/uuid"
 	"google.golang.org/grpc/keepalive"
 
-	"microservice-template/config"
-	"microservice-template/internal/models"
-	"microservice-template/pkg/logger"
-	"microservice-template/pkg/userservice"
-	proto "microservice-template/protocols/userservice"
+	"github.com/asolovov/evm-oracle-demo-api/config"
+	"github.com/asolovov/evm-oracle-demo-api/internal/models"
+	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
+	"github.com/asolovov/evm-oracle-demo-api/pkg/userservice"
+	proto "github.com/asolovov/evm-oracle-demo-api/protocols/userservice"
 )
 
 // Module implements module.Module interface for gRPC client.

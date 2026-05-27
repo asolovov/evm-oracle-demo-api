@@ -9,11 +9,11 @@ import (
 	"github.com/go-openapi/strfmt"
 	"github.com/gofrs/uuid"
 
-	"microservice-template/internal/grpcclient/mock"
-	"microservice-template/internal/http/models"
-	"microservice-template/internal/http/server/operations/users"
-	domainmodels "microservice-template/internal/models"
-	"microservice-template/internal/service"
+	"github.com/asolovov/evm-oracle-demo-api/internal/grpcclient/mock"
+	"github.com/asolovov/evm-oracle-demo-api/internal/http/models"
+	"github.com/asolovov/evm-oracle-demo-api/internal/http/server/operations/users"
+	domainmodels "github.com/asolovov/evm-oracle-demo-api/internal/models"
+	"github.com/asolovov/evm-oracle-demo-api/internal/service"
 )
 
 // mockService is a mock implementation of service.IService for testing.

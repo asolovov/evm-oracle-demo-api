@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"microservice-template/internal/models"
-	"microservice-template/internal/repository"
-	"microservice-template/pkg/logger"
+	"github.com/asolovov/evm-oracle-demo-api/internal/models"
+	"github.com/asolovov/evm-oracle-demo-api/internal/repository"
+	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
 )
 
 // IService defines the business logic interface for domain operations.
