@@ -33,7 +33,7 @@ Redis.
 |---------|--------|
 | REST surface (`/api/v1/*`) | implemented |
 | WebSocket fan-out (`/ws/stream`) | implemented |
-| Redis-backed rate limit (60/min + burst 10 by default) | implemented |
+| Redis-backed sliding-window rate limit (60/min + burst 10 by default) | implemented |
 | Prometheus `/metrics` + `/healthz` + `/readyz` | implemented |
 | `requestPrice(bytes32)` calldata builder | implemented |
 | Historical price endpoint | **stubbed — 501** until `price-service` exposes a history RPC |

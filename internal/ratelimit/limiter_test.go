@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -19,6 +20,19 @@ func newMiniRedis(t *testing.T) (*RedisLimiter, *miniredis.Miniredis) {
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	return NewRedisLimiter(client, 5, 2), mr
 }
+
+func newControlledClock(t *testing.T) (*RedisLimiter, *clock) {
+	t.Helper()
+	limiter, _ := newMiniRedis(t)
+	c := &clock{now: time.Unix(1_700_000_000, 0)}
+	limiter.nowFn = c.Now
+	return limiter, c
+}
+
+type clock struct{ now time.Time }
+
+func (c *clock) Now() time.Time          { return c.now }
+func (c *clock) Advance(d time.Duration) { c.now = c.now.Add(d) }
 
 func TestAllowFillsBucketThenRejects(t *testing.T) {
 	limiter, _ := newMiniRedis(t)
@@ -44,6 +58,55 @@ func TestAllowFillsBucketThenRejects(t *testing.T) {
 	}
 	if d.RetryAfter <= 0 {
 		t.Fatalf("expected RetryAfter > 0 on reject, got %v", d.RetryAfter)
+	}
+}
+
+func TestAllowWindowSlidesForward(t *testing.T) {
+	// Verifies the sliding-window semantics: tokens older than the window
+	// are evicted as wall-clock time advances, so the bucket recovers
+	// without waiting for the fixed-window boundary.
+	limiter, clk := newControlledClock(t)
+	ctx := context.Background()
+
+	// Burn the full limit at t=0. 5 + 2 = 7.
+	for i := 1; i <= 7; i++ {
+		if d, _ := limiter.Allow(ctx, "1.2.3.4"); !d.Allowed {
+			t.Fatalf("Allow #%d unexpectedly rejected", i)
+		}
+	}
+	// At t=30s, still inside the 60s window — must reject.
+	clk.Advance(30 * time.Second)
+	if d, _ := limiter.Allow(ctx, "1.2.3.4"); d.Allowed {
+		t.Fatalf("expected reject at t=30s (tokens still in window)")
+	}
+	// At t=61s, every token from t=0 has expired — must accept again.
+	clk.Advance(31 * time.Second)
+	if d, _ := limiter.Allow(ctx, "1.2.3.4"); !d.Allowed {
+		t.Fatalf("expected accept at t=61s (tokens evicted)")
+	}
+}
+
+func TestAllowRetryAfterShrinksAsWindowDrains(t *testing.T) {
+	limiter, clk := newControlledClock(t)
+	ctx := context.Background()
+
+	// Burn the limit.
+	for i := 1; i <= 7; i++ {
+		if _, err := limiter.Allow(ctx, "1.2.3.4"); err != nil {
+			t.Fatalf("Allow: %v", err)
+		}
+	}
+	// First reject at t=0 → Retry-After should be ~60s (rounded to the
+	// floor with the 1s minimum applied).
+	d, _ := limiter.Allow(ctx, "1.2.3.4")
+	if d.Allowed || d.RetryAfter < 59*time.Second {
+		t.Fatalf("expected reject with Retry-After >= 59s, got Allowed=%v Retry=%v", d.Allowed, d.RetryAfter)
+	}
+	// Advance 30s — Retry-After should now be ~30s.
+	clk.Advance(30 * time.Second)
+	d, _ = limiter.Allow(ctx, "1.2.3.4")
+	if d.Allowed || d.RetryAfter > 31*time.Second {
+		t.Fatalf("expected reject with Retry-After <= 31s at t=30s, got Allowed=%v Retry=%v", d.Allowed, d.RetryAfter)
 	}
 }
 
