@@ -25,8 +25,10 @@ type Server struct {
 	router *chi.Mux
 }
 
-// New constructs a Server with the API mounted under /api/v1.
-func New(cfg config.HTTPConfig, api *handlers.API) (*Server, error) {
+// New constructs a Server with the API mounted under /api/v1. apiMiddleware
+// is applied to the /api/v1 sub-route only — the WebSocket route bypasses
+// it (slow WS connections are fine; the rate limit is for REST endpoints).
+func New(cfg config.HTTPConfig, api *handlers.API, apiMiddleware ...func(http.Handler) http.Handler) (*Server, error) {
 	read, err := time.ParseDuration(cfg.ReadTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("parse http.read_timeout: %w", err)
@@ -41,8 +43,7 @@ func New(cfg config.HTTPConfig, api *handlers.API) (*Server, error) {
 	}
 
 	router := chi.NewRouter()
-	api.Register(router, middleware.CORS(cfg))
-	// WebSocket route is registered by Mount once the hub is constructed.
+	api.Register(router, middleware.CORS(cfg), apiMiddleware...)
 
 	srv := &http.Server{
 		Addr:         net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)),

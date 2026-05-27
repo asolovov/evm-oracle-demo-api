@@ -12,12 +12,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/asolovov/evm-oracle-demo-api/config"
 	"github.com/asolovov/evm-oracle-demo-api/internal/aggregatorregistry"
 	"github.com/asolovov/evm-oracle-demo-api/internal/handlers"
 	"github.com/asolovov/evm-oracle-demo-api/internal/indexerclient"
 	"github.com/asolovov/evm-oracle-demo-api/internal/module"
 	"github.com/asolovov/evm-oracle-demo-api/internal/priceclient"
+	"github.com/asolovov/evm-oracle-demo-api/internal/ratelimit"
 	"github.com/asolovov/evm-oracle-demo-api/internal/server"
 	"github.com/asolovov/evm-oracle-demo-api/internal/wshub"
 	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
@@ -36,6 +39,7 @@ type App struct {
 	registry      *aggregatorregistry.Registry
 	hub           *wshub.Hub
 	server        *server.Server
+	redisClient   redis.UniversalClient
 
 	wg      sync.WaitGroup
 	stopped sync.Once
@@ -98,10 +102,25 @@ func (app *App) Init() error {
 		ServiceID: "evm-oracle-demo-api",
 	}
 
-	srv, err := server.New(app.config.HTTP, api)
+	app.redisClient = redis.NewClient(&redis.Options{
+		Addr:     app.config.Redis.Addr,
+		Password: app.config.Redis.Password,
+		DB:       app.config.Redis.DB,
+	})
+
+	var apiMW []func(http.Handler) http.Handler
+	if app.config.RateLimit.Enabled {
+		limiter := ratelimit.NewRedisLimiter(app.redisClient, app.config.RateLimit.RequestsPerMinute, app.config.RateLimit.BurstSize)
+		// /api/v1/health is operator-facing and never rate-limited so a
+		// crashed Redis can't blackhole readiness checks.
+		apiMW = append(apiMW, ratelimit.Middleware(limiter, app.config.HTTP.TrustedProxies, []string{"/api/v1/health"}))
+	}
+
+	srv, err := server.New(app.config.HTTP, api, apiMW...)
 	if err != nil {
 		_ = pc.Close()
 		_ = ix.Close()
+		_ = app.redisClient.Close()
 		return fmt.Errorf("http server: %w", err)
 	}
 	app.server = srv
@@ -172,6 +191,11 @@ func (app *App) Stop() error {
 		}
 		if app.indexerClient != nil {
 			if err := app.indexerClient.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		if app.redisClient != nil {
+			if err := app.redisClient.Close(); err != nil && firstErr == nil {
 				firstErr = err
 			}
 		}
