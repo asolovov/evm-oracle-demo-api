@@ -1,175 +1,34 @@
-// Package http implements the HTTP transport module.
+// Package http hosts the REST + WebSocket transport. The implementation is
+// fleshed out across subsequent commits (handlers, middlewares, WS hub). This
+// skeleton keeps the module manager wiring stable in the meantime.
 package http
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"net/http"
-	"time"
 
-	"github.com/go-openapi/loads"
-	"github.com/justinas/alice"
-
-	"github.com/asolovov/evm-oracle-demo-api/config"
-	"github.com/asolovov/evm-oracle-demo-api/internal/grpcclient"
-	"github.com/asolovov/evm-oracle-demo-api/internal/http/auth"
-	"github.com/asolovov/evm-oracle-demo-api/internal/http/handlers"
-	"github.com/asolovov/evm-oracle-demo-api/internal/http/middlewares"
-	httpserver "github.com/asolovov/evm-oracle-demo-api/internal/http/server"
-	"github.com/asolovov/evm-oracle-demo-api/internal/http/server/operations"
-	"github.com/asolovov/evm-oracle-demo-api/internal/service"
 	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
 )
 
-// Module implements module.Module interface for the HTTP server.
-type Module struct {
-	config     *config.HTTPConfig
-	service    service.IService
-	grpcClient grpcclient.IClient
-	server     *httpserver.Server
-	api        *operations.EvmOracleDemoAPIAPIAPI
-	handler    *http.Handler
-	auth       *auth.Auth
-}
+// Module is the http transport module placeholder.
+type Module struct{}
 
-// NewModule creates a new HTTP module instance.
-func NewModule(cfg *config.HTTPConfig, svc service.IService, grpcClient grpcclient.IClient) *Module {
-	return &Module{
-		config:     cfg,
-		service:    svc,
-		grpcClient: grpcClient,
-	}
-}
+// NewModule returns an inert module that does nothing until later commits flesh it out.
+func NewModule() *Module { return &Module{} }
 
 // Name returns the module identifier.
-func (m *Module) Name() string {
-	return "http"
-}
+func (m *Module) Name() string { return "http" }
 
-// Init initializes the HTTP module.
+// Init does nothing yet.
 func (m *Module) Init(_ context.Context) error {
-	logger.Log().Infof("initializing %s module", m.Name())
-
-	// Initialize auth
-	m.auth = auth.NewAuth(m.service, m.config.MockAuth, m.config.AdminEmails)
-
-	// Initialize API
-	if err := m.initAPI(); err != nil {
-		return fmt.Errorf("init API: %w", err)
-	}
-
-	// Initialize server
-	if err := m.initServer(); err != nil {
-		return fmt.Errorf("init server: %w", err)
-	}
-
-	logger.Log().Infof("HTTP server configured on %s:%d", m.config.Host, m.config.Port)
+	logger.Log().Infof("initializing %s module (placeholder)", m.Name())
 	return nil
 }
 
-// Start begins module operation.
-func (m *Module) Start(_ context.Context) error {
-	logger.Log().Infof("starting %s module", m.Name())
+// Start does nothing yet.
+func (m *Module) Start(_ context.Context) error { return nil }
 
-	go func() {
-		logger.Log().Infof("HTTP server listening on %s:%d", m.config.Host, m.config.Port)
-		if err := m.server.Serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Log().Errorf("HTTP server error: %v", err)
-		}
-	}()
+// Stop does nothing yet.
+func (m *Module) Stop(_ context.Context) error { return nil }
 
-	return nil
-}
-
-// Stop gracefully shuts down the module.
-func (m *Module) Stop(_ context.Context) error {
-	logger.Log().Infof("stopping %s module", m.Name())
-
-	if m.server != nil {
-		if err := m.server.Shutdown(); err != nil {
-			return fmt.Errorf("shutdown server: %w", err)
-		}
-	}
-
-	logger.Log().Info("HTTP module stopped successfully")
-	return nil
-}
-
-// HealthCheck returns module health status.
-func (m *Module) HealthCheck(_ context.Context) error {
-	// HTTP module is healthy if server is running
-	// Could add a ping to actual server if needed
-	return nil
-}
-
-// initAPI initializes the API and wires handlers.
-func (m *Module) initAPI() error {
-	// Load swagger spec
-	swaggerSpec, err := loads.Analyzed(httpserver.SwaggerJSON, "")
-	if err != nil {
-		return fmt.Errorf("load swagger spec: %w", err)
-	}
-
-	// Create API instance
-	api := operations.NewEvmOracleDemoAPIAPIAPI(swaggerSpec)
-
-	// Configure logger
-	api.Logger = logger.Log().Infof
-
-	// Configure auth
-	api.JwtAuth = m.auth.CheckAuth
-
-	// Register handlers - pass grpcClient for external service access
-	api.UsersGetUserByEmailHandler = handlers.NewGetUserByEmail(m.service, m.grpcClient)
-	api.HealthGetHealthHandler = handlers.NewHealth()
-
-	// TODO: Add more handlers as you expand the API
-	// api.UsersCreateUserHandler = handlers.NewCreateUser(m.service)
-	// api.UsersUpdateUserHandler = handlers.NewUpdateUser(m.service)
-	// api.UsersDeleteUserHandler = handlers.NewDeleteUser(m.service)
-	// api.UsersListUsersHandler = handlers.NewListUsers(m.service)
-
-	// Build middleware chain
-	handler := alice.New(
-		middlewares.Recovery(),
-		middlewares.Logger(),
-		middlewares.Cors(m.config.CORS),
-		middlewares.RateLimit(m.config.RateLimit),
-	).Then(api.Serve(nil))
-
-	m.api = api
-	m.handler = &handler
-
-	return nil
-}
-
-// initServer initializes the HTTP server.
-func (m *Module) initServer() error {
-	// Create server instance
-	m.server = httpserver.NewServer(m.api)
-
-	if m.config.Host == "" {
-		return fmt.Errorf("http host is required")
-	}
-
-	if m.config.Port <= 0 || m.config.Port > 65535 {
-		return fmt.Errorf("http port must be between 1 and 65535")
-	}
-
-	m.server.Host = m.config.Host
-	m.server.Port = m.config.Port
-
-	// Parse and set timeouts
-	timeout, err := time.ParseDuration(m.config.Timeout)
-	if err != nil {
-		return fmt.Errorf("parse timeout: %w", err)
-	}
-	m.server.ReadTimeout = timeout
-	m.server.WriteTimeout = timeout
-
-	// Set handler with middleware
-	m.server.SetHandler(*m.handler)
-
-	return nil
-}
+// HealthCheck reports healthy until the real server lands.
+func (m *Module) HealthCheck(_ context.Context) error { return nil }
