@@ -1,6 +1,9 @@
 package metrics
 
 import (
+	"bufio"
+	"errors"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -8,6 +11,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// metricsRecorder wraps a ResponseWriter to capture the status code for the
+// per-route counter + histogram labels. Delegates Hijack + Flush to the
+// underlying writer so WebSocket upgrades and streaming responses still work
+// when this middleware sits in the chain.
 type metricsRecorder struct {
 	http.ResponseWriter
 	status int
@@ -20,6 +27,27 @@ func (s *metricsRecorder) WriteHeader(code int) {
 		s.wrote = true
 	}
 	s.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack passes the call through to the underlying writer when it supports
+// it, so WebSocket / SSE handlers can take over the connection.
+func (s *metricsRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := s.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("metrics.metricsRecorder: underlying ResponseWriter does not implement http.Hijacker")
+	}
+	if !s.wrote {
+		s.status = http.StatusSwitchingProtocols
+		s.wrote = true
+	}
+	return h.Hijack()
+}
+
+// Flush forwards to the underlying writer's Flusher when present.
+func (s *metricsRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // Middleware records http_requests_total + http_request_duration_seconds.
