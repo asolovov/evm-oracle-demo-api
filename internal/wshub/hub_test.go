@@ -10,11 +10,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 
 	"github.com/asolovov/evm-oracle-demo-api/config"
 	"github.com/asolovov/evm-oracle-demo-api/internal/aggregatorregistry"
 	"github.com/asolovov/evm-oracle-demo-api/internal/indexerclient"
+	"github.com/asolovov/evm-oracle-demo-api/internal/metrics"
+	"github.com/asolovov/evm-oracle-demo-api/internal/middleware"
 	"github.com/asolovov/evm-oracle-demo-api/internal/models"
 )
 
@@ -157,6 +160,46 @@ func TestHubBroadcastsToConnectedClients(t *testing.T) {
 		if env.Type != MessageTypePrice {
 			t.Fatalf("client #%d expected price envelope, got %q", i, env.Type)
 		}
+	}
+}
+
+// TestHubUpgradeThroughMiddlewareChain reproduces the regression caught
+// during the live-stack verify: AccessLog's statusRecorder + the metrics
+// middleware's metricsRecorder both wrap http.ResponseWriter, and if either
+// fails to delegate Hijack(), gorilla/websocket's upgrade returns 500
+// instead of 101. Drives a real WS handshake through the full chi chain.
+func TestHubUpgradeThroughMiddlewareChain(t *testing.T) {
+	hub, _, _, _ := newTestHub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	hub.Start(ctx)
+	t.Cleanup(hub.Stop)
+
+	m := metrics.New(metrics.Options{WSConnectionCount: func() float64 { return float64(hub.ClientCount()) }})
+
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID())
+	r.Use(middleware.AccessLog())
+	r.Use(middleware.Recovery())
+	r.Use(m.Middleware())
+	r.Get("/ws/stream", hub.Serve)
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	wsURL := strings.Replace(srv.URL, "http://", "ws://", 1) + "/ws/stream"
+	c, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		var status int
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("ws upgrade through chi+middleware failed: %v (status=%d)", err, status)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("expected 101 Switching Protocols, got %d", resp.StatusCode)
 	}
 }
 
