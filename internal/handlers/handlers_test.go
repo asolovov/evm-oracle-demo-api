@@ -411,6 +411,52 @@ func TestBuildTxUnresolvedAggregator(t *testing.T) {
 	}
 }
 
+func TestDocsServesSwaggerUI(t *testing.T) {
+	api, _, _ := newTestAPI()
+	r := newTestRouter(t, api)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/docs", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/docs status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
+		t.Fatalf("/docs Content-Type = %q, want text/html*", got)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "id=\"swagger-ui\"") {
+		t.Fatalf("/docs body missing swagger-ui mount point")
+	}
+	if !strings.Contains(body, "/api/v1/openapi.yaml") {
+		t.Fatalf("/docs body does not reference the spec URL")
+	}
+}
+
+func TestOpenAPISpecServesEmbeddedYAML(t *testing.T) {
+	api, _, _ := newTestAPI()
+	r := newTestRouter(t, api)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/openapi.yaml", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/openapi.yaml status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/yaml") {
+		t.Fatalf("/openapi.yaml Content-Type = %q, want application/yaml*", got)
+	}
+	body := rec.Body.String()
+	for _, marker := range []string{
+		"openapi: 3.1.0",
+		"/api/v1/health:",
+		"/api/v1/requests/build-tx:",
+		"BuildTxResponse:",
+	} {
+		if !strings.Contains(body, marker) {
+			t.Fatalf("/openapi.yaml body missing %q", marker)
+		}
+	}
+}
+
 // mustJSON decodes the recorder body into out, failing the test on error.
 func mustJSON(t *testing.T, rec *httptest.ResponseRecorder, out any) {
 	t.Helper()
