@@ -1,0 +1,440 @@
+openapi: 3.1.0
+info:
+  title: EVM Oracle Demo — REST API
+  description: |
+    Read-side REST surface over the EVM Oracle Demo gRPC plane. Translates the
+    `price-service` and `indexer-service` gRPC contracts into a dashboard-
+    friendly HTTP API. Pairs with the WebSocket endpoint at `/ws/stream` for
+    live updates (not described in this spec — see the README).
+  version: "1.0.0"
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  contact:
+    name: Andrei Solovov
+    url: https://github.com/asolovov
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://api.lighthouse-oracle.example
+    description: Production (placeholder)
+
+tags:
+  - name: meta
+    description: Service metadata.
+  - name: assets
+    description: Per-asset prices, history, and on-chain state.
+  - name: requests
+    description: User-initiated price requests and the calldata builder.
+
+paths:
+  /api/v1/health:
+    get:
+      tags: [meta]
+      summary: Liveness + author metadata.
+      description: |
+        Always returns 200 once the process is up. The `author` block surfaces
+        the credentials the portfolio site requires (FR-09). This endpoint is
+        never rate-limited.
+      responses:
+        "200":
+          description: Service is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/v1/assets:
+    get:
+      tags: [assets]
+      summary: List the 10 tracked assets with their latest aggregated price.
+      description: |
+        Joins the static catalog with the latest aggregated price + last
+        on-chain fulfilment per asset. Upstream failures degrade gracefully —
+        a missing price simply leaves `latest_price` out of the response so
+        the dashboard can still render the tile.
+      responses:
+        "200":
+          description: Catalog with optional per-asset price + on-chain context.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assets]
+                properties:
+                  assets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AssetSummary"
+
+  /api/v1/assets/{id}/price:
+    get:
+      tags: [assets]
+      summary: Drill-down view of one asset's current price.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Canonical lowercase asset id (e.g. `weth`, `xau`).
+      responses:
+        "200":
+          description: Per-asset price detail + per-source breakdown.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceDetail"
+        "404":
+          description: Asset not tracked, or no aggregated price observed yet.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Price-service is unreachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/assets/{id}/history:
+    get:
+      tags: [assets]
+      summary: Historical time-series for one asset.
+      description: |
+        Stubbed in v1 — `price-service` has no history RPC yet. Returns 501
+        with a pointer to the README's "Known gaps" section. The handler shape
+        is in place so this endpoint will activate in one commit once the
+        upstream RPC ships.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: Inclusive lower bound (epoch seconds).
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+        - name: interval
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["1m", "5m", "1h", "1d"]
+      responses:
+        "404":
+          description: Asset not tracked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "501":
+          description: History endpoint not yet implemented in this version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/requests/{reqId}:
+    get:
+      tags: [requests]
+      summary: Lifecycle status of a single price request.
+      parameters:
+        - name: reqId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: |
+            On-chain `uint256` request id as a base-10 decimal string.
+            Hex / 0x-prefixed values are rejected with 400.
+      responses:
+        "200":
+          description: Joined PriceRequested + PriceFulfilled view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestSummary"
+        "400":
+          description: req_id must be a base-10 uint256.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Request not observed by the indexer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Indexer-service is unreachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/requests/build-tx:
+    post:
+      tags: [requests]
+      summary: ABI-encoded calldata for `PriceAggregator.requestPrice(bytes32)`.
+      description: |
+        Pure builder — the BFF resolves the aggregator contract for the asset,
+        ABI-encodes the `requestPrice` call, and returns the
+        `{to, data, value, chain_id}` tuple the frontend signs and broadcasts.
+        **Never submits**.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BuildTxRequest"
+      responses:
+        "200":
+          description: Calldata + aggregator address + chain context.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildTxResponse"
+        "400":
+          description: Bad body or `chain_id` mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Asset not tracked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Aggregator address for this asset has not been observed yet.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service, version, author]
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: evm-oracle-demo-api
+        version:
+          type: string
+          example: "v1.0.0"
+        author:
+          $ref: "#/components/schemas/AuthorResponse"
+
+    AuthorResponse:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          example: Andrei Solovov
+        links:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            github: https://github.com/asolovov
+            linkedin: https://linkedin.com/in/asolovov
+
+    AssetClass:
+      type: string
+      enum: [crypto, rwa]
+
+    Asset:
+      type: object
+      required: [id, symbol, name, class]
+      properties:
+        id:
+          type: string
+          example: weth
+        symbol:
+          type: string
+          example: WETH
+        name:
+          type: string
+          example: Wrapped Ether
+        class:
+          $ref: "#/components/schemas/AssetClass"
+        aggregator_address:
+          type: string
+          description: 0x-prefixed PriceAggregator address; empty until observed.
+          example: "0xc0Ff000000000000000000000000000000000000"
+
+    SourceContribution:
+      type: object
+      required: [source, price, fetched_at, age_sec, included]
+      properties:
+        source:
+          type: string
+          example: coingecko
+        price:
+          type: number
+          format: double
+          example: 3450.20
+        fetched_at:
+          type: string
+          format: date-time
+        source_observed_at:
+          type: string
+          format: date-time
+        age_sec:
+          type: integer
+          format: int64
+        included:
+          type: boolean
+
+    AggregatedPrice:
+      type: object
+      required: [asset_id, median_price, aggregated_at, sources]
+      properties:
+        asset_id:
+          type: string
+          example: weth
+        median_price:
+          type: number
+          format: double
+        aggregated_at:
+          type: string
+          format: date-time
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceContribution"
+
+    AssetSummary:
+      allOf:
+        - $ref: "#/components/schemas/Asset"
+        - type: object
+          properties:
+            latest_price:
+              $ref: "#/components/schemas/AggregatedPrice"
+            last_on_chain_price:
+              type: string
+              description: int256 in Chainlink 8-decimal scale (base-10 decimal string).
+            last_on_chain_at:
+              type: string
+              format: date-time
+            last_on_chain_tx:
+              type: string
+
+    PriceDetail:
+      type: object
+      required: [asset, aggregated_price, sources]
+      properties:
+        asset:
+          $ref: "#/components/schemas/Asset"
+        aggregated_price:
+          $ref: "#/components/schemas/AggregatedPrice"
+        last_on_chain_price:
+          type: string
+        last_on_chain_at:
+          type: string
+          format: date-time
+        last_on_chain_tx:
+          type: string
+        last_round_id:
+          type: string
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceContribution"
+
+    RequestSummary:
+      type: object
+      required: [req_id, asset_id, status, requester, requested_tx_hash]
+      properties:
+        req_id:
+          type: string
+          description: uint256 as base-10 decimal string.
+        asset_id:
+          type: string
+        status:
+          type: string
+          enum: ["", pending, fulfilled, failed]
+        requester:
+          type: string
+        requested_tx_hash:
+          type: string
+        fulfilled_tx_hash:
+          type: string
+        fulfilled_price:
+          type: string
+        requested_at:
+          type: string
+          format: date-time
+        fulfilled_at:
+          type: string
+          format: date-time
+
+    BuildTxRequest:
+      type: object
+      required: [asset_id]
+      properties:
+        asset_id:
+          type: string
+          example: weth
+        chain_id:
+          type: integer
+          format: int64
+          description: Optional. When set, MUST match the BFF's configured chain.
+          example: 11155111
+
+    BuildTxResponse:
+      type: object
+      required: [to, data, value, chain_id]
+      properties:
+        to:
+          type: string
+          description: PriceAggregator contract address for this asset.
+        data:
+          type: string
+          description: 0x-prefixed ABI-encoded `requestPrice(bytes32)` calldata.
+        value:
+          type: string
+          description: Native-token fee in wei. v1 hardcodes "0".
+          example: "0"
+        chain_id:
+          type: integer
+          format: int64
+          example: 11155111
+        chain_name:
+          type: string
+          example: ethereum-sepolia
+
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: asset_not_tracked
+        message:
+          type: string
+          example: asset is not tracked
+        request_id:
+          type: string
+          description: Echoed when the request had an X-Request-Id header.

@@ -32,6 +32,11 @@ func (a *API) Register(r chi.Router, corsMW func(http.Handler) http.Handler, api
 		r.Get("/assets/{id}/history", a.GetAssetHistory)
 		r.Get("/requests/{reqId}", a.GetRequest)
 		r.Post("/requests/build-tx", a.BuildTx)
+		// Self-served API documentation. The HTML shell loads
+		// swagger-ui from a CDN; the spec itself ships embedded in the
+		// binary.
+		r.Get("/docs", a.Docs)
+		r.Get("/openapi.yaml", a.OpenAPISpec)
 	})
 }
 

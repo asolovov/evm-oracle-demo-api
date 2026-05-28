@@ -128,7 +128,10 @@ func (app *App) Init() error {
 		apiMW = append(apiMW, ratelimit.Middleware(
 			limiter,
 			app.config.HTTP.TrustedProxies,
-			[]string{"/api/v1/health"},
+			// Health is operator-facing; docs + the OpenAPI spec are
+			// static metadata. Rate-limiting any of these would be
+			// gratuitous.
+			[]string{"/api/v1/health", "/api/v1/docs", "/api/v1/openapi.yaml"},
 			func(ipClass string) { app.metrics.RateLimitRejectedTotal.WithLabelValues(ipClass).Inc() },
 		))
 	}

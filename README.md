@@ -79,11 +79,13 @@ All responses are JSON. Error responses share the same envelope:
 | Method | Path                              | Notes                                                                                  |
 |--------|-----------------------------------|----------------------------------------------------------------------------------------|
 | GET    | `/api/v1/health`                  | Liveness + author credential block (FR-09). Never rate-limited.                        |
-| GET    | `/api/v1/assets`                  | 10 catalog entries + per-asset latest price + last on-chain fulfilment.                |
+| GET    | `/api/v1/assets`                  | 10 catalog entries + per-asset latest price + last on-chain fulfillment.               |
 | GET    | `/api/v1/assets/{id}/price`       | Drill-down. 404 on unknown id / no price yet; 502 if `price-service` is unreachable.   |
 | GET    | `/api/v1/assets/{id}/history`     | **501** in v1 — `price-service` has no history RPC yet. See *Known gaps*.              |
 | GET    | `/api/v1/requests/{reqId}`        | Joined request lifecycle from `indexer.GetRequest`. `req_id` must be a base-10 uint256.|
 | POST   | `/api/v1/requests/build-tx`       | ABI-encoded `requestPrice(bytes32)` calldata + resolved aggregator address.            |
+| GET    | `/api/v1/docs`                    | Swagger UI rendered against the embedded OpenAPI spec. Never rate-limited.             |
+| GET    | `/api/v1/openapi.yaml`            | The OpenAPI 3.1 spec (canonical source at [`api/openapi.yaml`](api/openapi.yaml)).     |
 
 ### `POST /api/v1/requests/build-tx`
 
