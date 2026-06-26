@@ -233,9 +233,14 @@ func (a *API) attachLastOnChain(ctx context.Context, asset models.Asset, summary
 }
 
 func (a *API) latestOnChainRound(ctx context.Context, assetID string) *models.Event {
+	// Indexer events carry the on-chain bytes32 asset id (keccak256(symbol)).
+	idHash, ok := models.AssetIDHash(assetID)
+	if !ok {
+		return nil
+	}
 	events, _, err := a.Indexer.ListEvents(ctx, indexerclient.ListEventsFilter{
 		Kinds:   []models.EventKind{models.EventKindPriceFulfilled},
-		AssetID: aggregatorregistry.AssetIDToBytes32Hex(assetID),
+		AssetID: idHash,
 		Page:    indexerclient.Page{Number: 1, Size: 1},
 	})
 	if err != nil {

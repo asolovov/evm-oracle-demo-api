@@ -11,7 +11,6 @@ package aggregatorregistry
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"sync"
 
@@ -49,11 +48,14 @@ func (r *Registry) Load(ctx context.Context, ix indexerclient.Client) error {
 		if e.AssetRegistered == nil {
 			continue
 		}
-		assetID, ok := AssetIDFromBytes32Hex(e.AssetRegistered.AssetID)
+		// On-chain asset ids are keccak256(symbol); reverse-map them to the
+		// catalog id via the precomputed table. Ids outside our 10-asset
+		// universe are skipped.
+		asset, ok := models.AssetByIDHash(e.AssetRegistered.AssetID)
 		if !ok {
 			continue
 		}
-		r.Set(assetID, e.AssetRegistered.Aggregator)
+		r.Set(asset.ID, e.AssetRegistered.Aggregator)
 	}
 	return nil
 }
@@ -85,44 +87,4 @@ func (r *Registry) Snapshot() map[string]string {
 		out[k] = v
 	}
 	return out
-}
-
-// AssetIDToBytes32Hex converts a lowercase-symbol asset id ("weth") to the
-// on-chain bytes32 form used by the contract layer. Right-pads with zeros
-// to 32 bytes; result is `0x` + 64 lowercase hex chars.
-func AssetIDToBytes32Hex(id string) string {
-	id = models.NormaliseAssetID(id)
-	var b [32]byte
-	copy(b[:], id)
-	return "0x" + hex.EncodeToString(b[:])
-}
-
-// AssetIDFromBytes32Hex inverts AssetIDToBytes32Hex: take a 0x-prefixed
-// 32-byte hex string, strip trailing zero padding, decode the ASCII symbol.
-// Returns false if input is malformed.
-func AssetIDFromBytes32Hex(s string) (string, bool) {
-	if len(s) < 2 || s[:2] != "0x" && s[:2] != "0X" {
-		return "", false
-	}
-	raw, err := hex.DecodeString(s[2:])
-	if err != nil || len(raw) != 32 {
-		return "", false
-	}
-	// Strip trailing 0x00 padding.
-	end := 32
-	for end > 0 && raw[end-1] == 0 {
-		end--
-	}
-	if end == 0 {
-		return "", false
-	}
-	out := string(raw[:end])
-	// Validate ASCII lower / digit only; reject any non-printable.
-	for i := 0; i < len(out); i++ {
-		c := out[i]
-		if (c < 'a' || c > 'z') && (c < '0' || c > '9') {
-			return "", false
-		}
-	}
-	return out, true
 }
