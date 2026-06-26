@@ -21,6 +21,7 @@ import (
 	"github.com/asolovov/evm-oracle-demo-api/internal/indexerclient"
 	"github.com/asolovov/evm-oracle-demo-api/internal/metrics"
 	"github.com/asolovov/evm-oracle-demo-api/internal/module"
+	"github.com/asolovov/evm-oracle-demo-api/internal/oracleclient"
 	"github.com/asolovov/evm-oracle-demo-api/internal/priceclient"
 	"github.com/asolovov/evm-oracle-demo-api/internal/ratelimit"
 	"github.com/asolovov/evm-oracle-demo-api/internal/server"
@@ -38,6 +39,7 @@ type App struct {
 
 	priceClient   priceclient.Client
 	indexerClient indexerclient.Client
+	oracleClient  oracleclient.Client
 	registry      *aggregatorregistry.Registry
 	hub           *wshub.Hub
 	server        *server.Server
@@ -86,6 +88,14 @@ func (app *App) Init() error {
 	}
 	app.indexerClient = ix
 
+	oc, err := oracleclient.Dial(app.config.GRPCClient)
+	if err != nil {
+		_ = pc.Close()
+		_ = ix.Close()
+		return fmt.Errorf("oracle client: %w", err)
+	}
+	app.oracleClient = oc
+
 	// Best-effort registry seed. The BFF must come up even if the
 	// indexer is temporarily unreachable — build-tx returns 503 until the
 	// registry has the aggregator address. The WS hub will refresh on
@@ -96,16 +106,26 @@ func (app *App) Init() error {
 		logger.Log().WithError(err).Warn("aggregator registry: initial load failed (will retry on first live event)")
 	}
 
-	// Metrics — constructed before the hub so the hub's OnSend / OnDrop
-	// callbacks can reference the counters. WSConnectionCount is wired
-	// post-hub-construction below.
+	// Metrics — constructed exactly once. The ws_connections_active gauge
+	// reads app.hub lazily (the hub is built further down, after the
+	// server), so there's no construct-twice dance: the HTTP middleware,
+	// the OnSend/OnDrop callbacks, and the /metrics registry all reference
+	// this single instance. (A previous version rebuilt metrics.New after
+	// the hub to wire the gauge, which silently orphaned the HTTP-request
+	// counters on the discarded first registry.)
 	app.metrics = metrics.New(metrics.Options{
-		WSConnectionCount: func() float64 { return 0 },
+		WSConnectionCount: func() float64 {
+			if app.hub == nil {
+				return 0
+			}
+			return float64(app.hub.ClientCount())
+		},
 	})
 
 	api := &handlers.API{
 		Price:            app.priceClient,
 		Indexer:          app.indexerClient,
+		Oracle:           app.oracleClient,
 		Registry:         app.registry,
 		Author:           app.config.Author,
 		Chain:            app.config.Chain,
@@ -140,6 +160,7 @@ func (app *App) Init() error {
 	if err != nil {
 		_ = pc.Close()
 		_ = ix.Close()
+		_ = oc.Close()
 		_ = app.redisClient.Close()
 		return fmt.Errorf("http server: %w", err)
 	}
@@ -157,16 +178,6 @@ func (app *App) Init() error {
 	)
 	app.server.HandleWebSocket(app.hub.Serve)
 
-	// Re-construct the metrics layer with a real ws_connections_active
-	// gauge function now that we have the hub instance. The previous
-	// `metrics.New(...)` was a bootstrap with a zero gauge — its
-	// counters are still in use, so we keep the same registry and only
-	// rewire the gauge by replacing the struct.
-	hub := app.hub
-	app.metrics = metrics.New(metrics.Options{
-		WSConnectionCount: func() float64 { return float64(hub.ClientCount()) },
-	})
-
 	hz, err := healthz.New(
 		app.config.Healthz,
 		app.metrics.Registry,
@@ -177,6 +188,7 @@ func (app *App) Init() error {
 	if err != nil {
 		_ = pc.Close()
 		_ = ix.Close()
+		_ = oc.Close()
 		_ = app.redisClient.Close()
 		return fmt.Errorf("healthz server: %w", err)
 	}
@@ -262,6 +274,11 @@ func (app *App) Stop() error {
 		}
 		if app.indexerClient != nil {
 			if err := app.indexerClient.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		if app.oracleClient != nil {
+			if err := app.oracleClient.Close(); err != nil && firstErr == nil {
 				firstErr = err
 			}
 		}

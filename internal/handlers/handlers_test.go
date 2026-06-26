@@ -16,6 +16,7 @@ import (
 	"github.com/asolovov/evm-oracle-demo-api/internal/aggregatorregistry"
 	"github.com/asolovov/evm-oracle-demo-api/internal/indexerclient"
 	"github.com/asolovov/evm-oracle-demo-api/internal/models"
+	"github.com/asolovov/evm-oracle-demo-api/internal/oracleclient"
 	"github.com/asolovov/evm-oracle-demo-api/internal/priceclient"
 )
 
@@ -70,6 +71,40 @@ func (m *indexerMock) StreamEvents(_ context.Context, _ indexerclient.StreamEven
 
 func (m *indexerMock) Close() error { return nil }
 
+type oracleMock struct {
+	byReqID  map[string]models.SubmissionStatus
+	byTxHash map[string]models.SubmissionStatus
+	list     []models.SubmissionStatus
+	listErr  error
+	lastList oracleclient.ListSubmissionsFilter
+}
+
+func (m *oracleMock) GetSubmissionByReqID(_ context.Context, reqID string) (models.SubmissionStatus, error) {
+	s, ok := m.byReqID[reqID]
+	if !ok {
+		return models.SubmissionStatus{}, oracleclient.ErrNotFound
+	}
+	return s, nil
+}
+
+func (m *oracleMock) GetSubmissionByTxHash(_ context.Context, txHash string) (models.SubmissionStatus, error) {
+	s, ok := m.byTxHash[txHash]
+	if !ok {
+		return models.SubmissionStatus{}, oracleclient.ErrNotFound
+	}
+	return s, nil
+}
+
+func (m *oracleMock) ListSubmissions(_ context.Context, filter oracleclient.ListSubmissionsFilter) ([]models.SubmissionStatus, oracleclient.PageInfo, error) {
+	m.lastList = filter
+	if m.listErr != nil {
+		return nil, oracleclient.PageInfo{}, m.listErr
+	}
+	return m.list, oracleclient.PageInfo{Number: filter.Page.Number, Size: filter.Page.Size, TotalItems: int64(len(m.list)), TotalPages: 1}, nil
+}
+
+func (m *oracleMock) Close() error { return nil }
+
 // --- setup ---------------------------------------------------------------
 
 func newTestRouter(t *testing.T, api *API) http.Handler {
@@ -88,6 +123,7 @@ func newTestAPI() (*API, *priceMock, *indexerMock) {
 	return &API{
 		Price:    price,
 		Indexer:  indexer,
+		Oracle:   &oracleMock{byReqID: map[string]models.SubmissionStatus{}, byTxHash: map[string]models.SubmissionStatus{}},
 		Registry: registry,
 		Author: config.AuthorConfig{
 			Name:  "Andrei Solovov",
@@ -101,6 +137,17 @@ func newTestAPI() (*API, *priceMock, *indexerMock) {
 		Version:   "test",
 		ServiceID: "evm-oracle-demo-api",
 	}, price, indexer
+}
+
+// oracleFromAPI returns the oracleMock wired into the API by newTestAPI so
+// submission tests can seed it.
+func oracleFromAPI(t *testing.T, api *API) *oracleMock {
+	t.Helper()
+	m, ok := api.Oracle.(*oracleMock)
+	if !ok {
+		t.Fatalf("API.Oracle is not an *oracleMock")
+	}
+	return m
 }
 
 // --- tests ---------------------------------------------------------------
@@ -411,6 +458,124 @@ func TestBuildTxUnresolvedAggregator(t *testing.T) {
 	}
 }
 
+func TestListSubmissions(t *testing.T) {
+	api, _, _ := newTestAPI()
+	oracle := oracleFromAPI(t, api)
+	oracle.list = []models.SubmissionStatus{
+		{ReqID: "42", AssetID: "weth", Status: models.SubmissionStatusExpired},
+		{ReqID: "0", AssetID: "wbtc", Status: models.SubmissionStatusConfirmed},
+	}
+	r := newTestRouter(t, api)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/submissions?asset_id=WETH&page=2&page_size=10", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Submissions []models.SubmissionStatus `json:"submissions"`
+		Page        struct {
+			Number int `json:"number"`
+			Size   int `json:"size"`
+		} `json:"page"`
+	}
+	mustJSON(t, rec, &body)
+	if len(body.Submissions) != 2 || body.Submissions[0].Status != models.SubmissionStatusExpired {
+		t.Fatalf("unexpected submissions: %+v", body.Submissions)
+	}
+	// asset_id normalised to lowercase, page params threaded through.
+	if oracle.lastList.AssetID != "weth" || oracle.lastList.Page.Number != 2 || oracle.lastList.Page.Size != 10 {
+		t.Fatalf("filter not threaded: %+v", oracle.lastList)
+	}
+}
+
+func TestListSubmissionsCapsPageSize(t *testing.T) {
+	api, _, _ := newTestAPI()
+	oracle := oracleFromAPI(t, api)
+	r := newTestRouter(t, api)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/submissions?page_size=99999", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if oracle.lastList.Page.Size != maxSubmissionsPageSize {
+		t.Fatalf("page_size not capped: got %d, want %d", oracle.lastList.Page.Size, maxSubmissionsPageSize)
+	}
+}
+
+func TestListSubmissionsRejectsUnknownAsset(t *testing.T) {
+	api, _, _ := newTestAPI()
+	r := newTestRouter(t, api)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/submissions?asset_id=doge", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unknown asset filter should 400, got %d", rec.Code)
+	}
+}
+
+func TestGetSubmissionByReqID(t *testing.T) {
+	api, _, _ := newTestAPI()
+	oracle := oracleFromAPI(t, api)
+	oracle.byReqID["42"] = models.SubmissionStatus{ReqID: "42", AssetID: "weth", Status: models.SubmissionStatusExpired}
+	r := newTestRouter(t, api)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/submissions/42", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var got models.SubmissionStatus
+	mustJSON(t, rec, &got)
+	if got.Status != models.SubmissionStatusExpired {
+		t.Fatalf("status = %q, want expired", got.Status)
+	}
+}
+
+func TestGetSubmissionByTxHash(t *testing.T) {
+	api, _, _ := newTestAPI()
+	oracle := oracleFromAPI(t, api)
+	tx := "0x" + strings.Repeat("ab", 32)
+	oracle.byTxHash[tx] = models.SubmissionStatus{ReqID: "0", AssetID: "weth", TxHash: tx, Status: models.SubmissionStatusConfirmed}
+	r := newTestRouter(t, api)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/submissions/"+tx, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var got models.SubmissionStatus
+	mustJSON(t, rec, &got)
+	if got.Status != models.SubmissionStatusConfirmed || got.ReqID != "0" {
+		t.Fatalf("unexpected: %+v", got)
+	}
+}
+
+func TestGetSubmissionRejectsZeroAndGarbage(t *testing.T) {
+	api, _, _ := newTestAPI()
+	r := newTestRouter(t, api)
+
+	for _, id := range []string{"0", "0xabc", "notanid", "0x" + strings.Repeat("zz", 32)} {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/submissions/"+id, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("id %q should 400, got %d", id, rec.Code)
+		}
+	}
+}
+
+func TestGetSubmissionNotFound(t *testing.T) {
+	api, _, _ := newTestAPI()
+	r := newTestRouter(t, api)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/submissions/999", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing submission should 404, got %d", rec.Code)
+	}
+}
+
 func TestDocsServesSwaggerUI(t *testing.T) {
 	api, _, _ := newTestAPI()
 	r := newTestRouter(t, api)
@@ -450,6 +615,9 @@ func TestOpenAPISpecServesEmbeddedYAML(t *testing.T) {
 		"/api/v1/health:",
 		"/api/v1/requests/build-tx:",
 		"BuildTxResponse:",
+		"/api/v1/submissions:",
+		"/api/v1/submissions/{id}:",
+		"SubmissionStatus:",
 	} {
 		if !strings.Contains(body, marker) {
 			t.Fatalf("/openapi.yaml body missing %q", marker)

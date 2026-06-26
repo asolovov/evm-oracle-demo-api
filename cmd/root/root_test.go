@@ -117,6 +117,60 @@ func TestInitializeConfig_BindsEnvAndFlags(t *testing.T) {
 	}
 }
 
+func TestInitializeConfig_DecodesAuthorLinksJSON(t *testing.T) {
+	resetViper(t)
+	t.Cleanup(func() { resetViper(t) })
+
+	cfg := &config.Scheme{}
+	cmd := newTestCmd()
+
+	viper.SetDefault("author.links", map[string]string{})
+	t.Setenv("AUTHOR_LINKS", `{"github":"https://github.com/asolovov","linkedin":"https://linkedin.com/in/asolovov"}`)
+
+	if err := initializeConfig(cmd, cfg); err != nil {
+		t.Fatalf("initializeConfig returned error: %v", err)
+	}
+	if got := cfg.Author.Links["github"]; got != "https://github.com/asolovov" {
+		t.Fatalf("author.links[github] = %q, want the github URL", got)
+	}
+	if got := cfg.Author.Links["linkedin"]; got != "https://linkedin.com/in/asolovov" {
+		t.Fatalf("author.links[linkedin] = %q, want the linkedin URL", got)
+	}
+}
+
+func TestInitializeConfig_AuthorLinksInvalidJSONErrors(t *testing.T) {
+	resetViper(t)
+	t.Cleanup(func() { resetViper(t) })
+
+	cfg := &config.Scheme{}
+	cmd := newTestCmd()
+
+	viper.SetDefault("author.links", map[string]string{})
+	t.Setenv("AUTHOR_LINKS", "not-json")
+
+	if err := initializeConfig(cmd, cfg); err == nil {
+		t.Fatalf("expected an error for non-JSON AUTHOR_LINKS, got nil")
+	}
+}
+
+func TestInitializeConfig_EmptyAuthorLinksIsEmptyMap(t *testing.T) {
+	resetViper(t)
+	t.Cleanup(func() { resetViper(t) })
+
+	cfg := &config.Scheme{}
+	cmd := newTestCmd()
+
+	viper.SetDefault("author.links", map[string]string{})
+	t.Setenv("AUTHOR_LINKS", "")
+
+	if err := initializeConfig(cmd, cfg); err != nil {
+		t.Fatalf("empty AUTHOR_LINKS should not error, got %v", err)
+	}
+	if len(cfg.Author.Links) != 0 {
+		t.Fatalf("expected empty links map, got %v", cfg.Author.Links)
+	}
+}
+
 func TestBindFlagsSetsDefaultsFromViper(t *testing.T) {
 	resetViper(t)
 	t.Cleanup(func() { resetViper(t) })

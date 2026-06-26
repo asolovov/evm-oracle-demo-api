@@ -5,6 +5,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- `oracle/v1/oracle.proto` — `SubmissionStatus.Status.STATUS_EXPIRED = 5`: terminal state for a request abandoned before broadcast (TTL elapsed while queued/processing/signing, no nonce consumed). Distinct from `STATUS_FAILED`; nothing was sent on-chain. Backwards-compatible enum addition. Required by oracle-service async-processing task 06.1.
+
 ## [0.1.0] — TBD
 
 Initial release. Cut by the human after task 05 (`evm-oracle-demo-price-service`) confirms downstream subtree integration end-to-end.

@@ -27,6 +27,7 @@ func TestDefaultsCoverEverySchemeKey(t *testing.T) {
 		"healthz.host", "healthz.port",
 		"redis.addr", "redis.password", "redis.db",
 		"grpc_client.price_service_addr", "grpc_client.indexer_service_addr",
+		"grpc_client.oracle_service_addr",
 		"grpc_client.dial_timeout", "grpc_client.use_tls",
 		"grpc_client.keep_alive.time", "grpc_client.keep_alive.timeout",
 		"grpc_client.keep_alive.permit_without_stream",
@@ -64,6 +65,11 @@ func TestValidateRejectsMissingRequired(t *testing.T) {
 			"indexer_addr_empty",
 			func(s *Scheme) { s.GRPCClient.IndexerServiceAddr = "" },
 			"indexer_service_addr",
+		},
+		{
+			"oracle_addr_empty",
+			func(s *Scheme) { s.GRPCClient.OracleServiceAddr = "" },
+			"oracle_service_addr",
 		},
 		{
 			"chain_id_zero",
@@ -130,6 +136,7 @@ func happyPathScheme() Scheme {
 		GRPCClient: GRPCClientConfig{
 			PriceServiceAddr:   "localhost:50051",
 			IndexerServiceAddr: "localhost:50052",
+			OracleServiceAddr:  "localhost:50053",
 		},
 		Chain: ChainConfig{
 			ChainID:         11155111,
