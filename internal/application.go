@@ -106,11 +106,20 @@ func (app *App) Init() error {
 		logger.Log().WithError(err).Warn("aggregator registry: initial load failed (will retry on first live event)")
 	}
 
-	// Metrics — constructed before the hub so the hub's OnSend / OnDrop
-	// callbacks can reference the counters. WSConnectionCount is wired
-	// post-hub-construction below.
+	// Metrics — constructed exactly once. The ws_connections_active gauge
+	// reads app.hub lazily (the hub is built further down, after the
+	// server), so there's no construct-twice dance: the HTTP middleware,
+	// the OnSend/OnDrop callbacks, and the /metrics registry all reference
+	// this single instance. (A previous version rebuilt metrics.New after
+	// the hub to wire the gauge, which silently orphaned the HTTP-request
+	// counters on the discarded first registry.)
 	app.metrics = metrics.New(metrics.Options{
-		WSConnectionCount: func() float64 { return 0 },
+		WSConnectionCount: func() float64 {
+			if app.hub == nil {
+				return 0
+			}
+			return float64(app.hub.ClientCount())
+		},
 	})
 
 	api := &handlers.API{
@@ -168,16 +177,6 @@ func (app *App) Init() error {
 		},
 	)
 	app.server.HandleWebSocket(app.hub.Serve)
-
-	// Re-construct the metrics layer with a real ws_connections_active
-	// gauge function now that we have the hub instance. The previous
-	// `metrics.New(...)` was a bootstrap with a zero gauge — its
-	// counters are still in use, so we keep the same registry and only
-	// rewire the gauge by replacing the struct.
-	hub := app.hub
-	app.metrics = metrics.New(metrics.Options{
-		WSConnectionCount: func() float64 { return float64(hub.ClientCount()) },
-	})
 
 	hz, err := healthz.New(
 		app.config.Healthz,

@@ -171,7 +171,7 @@ required (`Validate()` fails fast on startup):
 | `RATE_LIMIT_REQUESTS_PER_MINUTE`         | `60`                             |  |
 | `RATE_LIMIT_BURST_SIZE`                  | `10`                             |  |
 | `AUTHOR_NAME`                            | (empty)                          | **Required.** Echoed in `/api/v1/health` (FR-09). |
-| `AUTHOR_LINKS`                           | `{}`                             | JSON map (e.g. `{"github":"…","linkedin":"…"}`). |
+| `AUTHOR_LINKS`                           | `{}`                             | JSON object string, e.g. `AUTHOR_LINKS='{"github":"…","linkedin":"…"}'`. |
 | `CHAIN_CHAIN_ID`                         | `11155111` (Ethereum Sepolia)    | Must match the contracts deployment. |
 | `CHAIN_REGISTRY_ADDRESS`                 | `0x89a6c12a403733c6a817472cec46a530581cb7ef` | OracleRegistry contract address. |
 | `TELEMETRY_LOG_LEVEL`                    | `info`                           |  |
