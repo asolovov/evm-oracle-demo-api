@@ -57,12 +57,13 @@ type RedisConfig struct {
 // fans out to. External client wrappers are plain packages, not template
 // modules (architecture rule 5).
 type GRPCClientConfig struct {
-	PriceServiceAddr   string             `mapstructure:"price_service_addr"`
-	IndexerServiceAddr string             `mapstructure:"indexer_service_addr"`
-	DialTimeout        string             `mapstructure:"dial_timeout"`
-	KeepAlive          KeepAliveConfig    `mapstructure:"keep_alive"`
-	UseTLS             bool               `mapstructure:"use_tls"`
-	Subscribe          SubscribeConfig    `mapstructure:"subscribe"`
+	PriceServiceAddr   string          `mapstructure:"price_service_addr"`
+	IndexerServiceAddr string          `mapstructure:"indexer_service_addr"`
+	OracleServiceAddr  string          `mapstructure:"oracle_service_addr"`
+	DialTimeout        string          `mapstructure:"dial_timeout"`
+	KeepAlive          KeepAliveConfig `mapstructure:"keep_alive"`
+	UseTLS             bool            `mapstructure:"use_tls"`
+	Subscribe          SubscribeConfig `mapstructure:"subscribe"`
 }
 
 // KeepAliveConfig holds gRPC keep-alive settings shared by every client.
@@ -135,6 +136,9 @@ func (s *Scheme) Validate() error {
 	}
 	if s.GRPCClient.IndexerServiceAddr == "" {
 		errs = append(errs, errors.New("grpc_client.indexer_service_addr is required"))
+	}
+	if s.GRPCClient.OracleServiceAddr == "" {
+		errs = append(errs, errors.New("grpc_client.oracle_service_addr is required"))
 	}
 	if s.Chain.ChainID <= 0 {
 		errs = append(errs, errors.New("chain.chain_id is required (e.g. 11155111 for Ethereum Sepolia)"))

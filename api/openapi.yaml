@@ -27,6 +27,8 @@ tags:
     description: Per-asset prices, history, and on-chain state.
   - name: requests
     description: User-initiated price requests and the calldata builder.
+  - name: submissions
+    description: Oracle-service submission lifecycle (signing + on-chain tx).
 
 paths:
   /api/v1/health:
@@ -222,6 +224,107 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           description: Aggregator address for this asset has not been observed yet.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/submissions:
+    get:
+      tags: [submissions]
+      summary: Paginated oracle submission history.
+      description: |
+        Submission lifecycle records from oracle-service, newest first.
+        Each record is one `fulfillPrice` transaction (or an abandoned
+        attempt). Optionally filtered by asset.
+      parameters:
+        - name: asset_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Canonical lowercase asset id. Rejected with 400 if not tracked.
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+      responses:
+        "200":
+          description: A page of submissions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [submissions, page]
+                properties:
+                  submissions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SubmissionStatus"
+                  page:
+                    $ref: "#/components/schemas/PageInfo"
+        "400":
+          description: asset_id filter is not a tracked asset.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: oracle-service is unreachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/submissions/{id}:
+    get:
+      tags: [submissions]
+      summary: One submission, by req_id or tx hash.
+      description: |
+        `id` is dispatched by shape:
+        a `0x`-prefixed 32-byte hex string is looked up as a **tx hash**
+        (the only way to reach heartbeat submissions, which carry
+        `req_id = "0"`); an all-decimal non-zero string is looked up as a
+        consumer **req_id**. `"0"` and any other shape are rejected with 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: A non-zero base-10 req_id, or a 0x-prefixed 32-byte tx hash.
+      responses:
+        "200":
+          description: The submission lifecycle record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionStatus"
+        "400":
+          description: id is "0", or not a valid req_id / tx hash.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No submission for that id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: oracle-service is unreachable.
           content:
             application/json:
               schema:
@@ -424,6 +527,63 @@ components:
         chain_name:
           type: string
           example: ethereum-sepolia
+
+    SubmissionStatus:
+      type: object
+      required: [req_id, asset_id, status, retry_count]
+      properties:
+        req_id:
+          type: string
+          description: uint256 as base-10 decimal string. "0" for heartbeat submissions.
+        asset_id:
+          type: string
+        tx_hash:
+          type: string
+          description: 0x-prefixed 32-byte hash. Empty while pending pre-broadcast.
+        submitted_price:
+          type: string
+          description: int256 in Chainlink 8-decimal scale (base-10 decimal string). Empty until signed.
+        submitted_at:
+          type: string
+          format: date-time
+          description: Server-set broadcast time. Omitted until broadcast.
+        status:
+          type: string
+          description: |
+            Submission lifecycle state:
+            - `pending` — built/signed and in-mempool, or not yet broadcast.
+            - `confirmed` — mined successfully.
+            - `failed` — mined and reverted, or rejected pre-broadcast.
+            - `dropped` — fell out of the mempool after retries.
+            - `expired` — abandoned before broadcast (TTL elapsed while
+              queued/processing/signing); no nonce consumed, nothing sent
+              on-chain. Distinct from `failed`.
+          enum: ["", pending, confirmed, failed, dropped, expired]
+        retry_count:
+          type: integer
+          format: int64
+          description: Number of replace-by-fee attempts so far.
+        last_error:
+          type: string
+          description: Free-form error from the last failed broadcast / revert. Empty unless failed.
+
+    PageInfo:
+      type: object
+      required: [number, size, total_items, total_pages]
+      properties:
+        number:
+          type: integer
+          format: int32
+          description: Current page (1-indexed).
+        size:
+          type: integer
+          format: int32
+        total_items:
+          type: integer
+          format: int64
+        total_pages:
+          type: integer
+          format: int32
 
     ErrorResponse:
       type: object

@@ -10,6 +10,12 @@
 # the generated Go sources live under this service's module path. The
 # protocols repo stays language-agnostic; each consumer service owns its
 # own retarget.
+#
+# Local plugins (not buf.build remote): codegen must work offline and
+# without a buf.build account — the remote plugins 403 in CI / sandboxed
+# builds. `make proto-install` and the Dockerfile both `go install` the
+# pinned protoc-gen-go / protoc-gen-go-grpc onto PATH, so `local:` resolves
+# to those exact versions everywhere.
 
 version: v2
 managed:
@@ -18,10 +24,10 @@ managed:
     - file_option: go_package_prefix
       value: github.com/asolovov/evm-oracle-demo-api/internal/genproto
 plugins:
-  - remote: buf.build/protocolbuffers/go
+  - local: protoc-gen-go
     out: internal/genproto
     opt: paths=source_relative
-  - remote: buf.build/grpc/go
+  - local: protoc-gen-go-grpc
     out: internal/genproto
     opt: paths=source_relative
 inputs:

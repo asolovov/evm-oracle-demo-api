@@ -27,11 +27,13 @@ services:
       HEALTHZ_PORT: 8081
       REDIS_ADDR: redis:6379
       AUTHOR_NAME: "Andrei Solovov"
-      # The two upstream services live on the host's loopback in dev. In a
-      # full docker-compose with price-service + indexer-service alongside
-      # this BFF, override these to "price-service:50051" / "indexer-service:50052".
+      # The three upstream services live on the host's loopback in dev. In a
+      # full docker-compose with price-service + indexer-service + oracle-service
+      # alongside this BFF, override these to "price-service:50051" /
+      # "indexer-service:50052" / "oracle-service:50053".
       GRPC_CLIENT_PRICE_SERVICE_ADDR: "host.docker.internal:50051"
       GRPC_CLIENT_INDEXER_SERVICE_ADDR: "host.docker.internal:50052"
+      GRPC_CLIENT_ORACLE_SERVICE_ADDR: "host.docker.internal:50053"
       # Chain defaults match the contracts repo's deployment on Ethereum
       # Sepolia. Override CHAIN_* if you redeploy.
       CHAIN_CHAIN_ID: 11155111

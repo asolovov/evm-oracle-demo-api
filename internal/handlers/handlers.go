@@ -17,6 +17,7 @@ import (
 	"github.com/asolovov/evm-oracle-demo-api/internal/aggregatorregistry"
 	"github.com/asolovov/evm-oracle-demo-api/internal/indexerclient"
 	"github.com/asolovov/evm-oracle-demo-api/internal/models"
+	"github.com/asolovov/evm-oracle-demo-api/internal/oracleclient"
 	"github.com/asolovov/evm-oracle-demo-api/internal/priceclient"
 	"github.com/asolovov/evm-oracle-demo-api/pkg/logger"
 )
@@ -26,6 +27,7 @@ import (
 type API struct {
 	Price            priceclient.Client
 	Indexer          indexerclient.Client
+	Oracle           oracleclient.Client
 	Registry         *aggregatorregistry.Registry
 	Author           config.AuthorConfig
 	Chain            config.ChainConfig

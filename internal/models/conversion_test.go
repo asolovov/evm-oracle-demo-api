@@ -7,6 +7,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	indexerv1 "github.com/asolovov/evm-oracle-demo-api/internal/genproto/indexer/v1"
+	oraclev1 "github.com/asolovov/evm-oracle-demo-api/internal/genproto/oracle/v1"
 	pricev1 "github.com/asolovov/evm-oracle-demo-api/internal/genproto/price/v1"
 )
 
@@ -173,5 +174,48 @@ func TestRequestSummaryFromProto(t *testing.T) {
 	}
 	if got := RequestSummaryFromProto(pending); got.FulfilledAt != nil {
 		t.Fatalf("FulfilledAt should be nil for pending request, got %v", got.FulfilledAt)
+	}
+}
+
+func TestSubmissionStatusFromProto(t *testing.T) {
+	submitted := time.Date(2026, 5, 28, 11, 0, 0, 0, time.UTC)
+	in := &oraclev1.SubmissionStatus{
+		ReqId:          "42",
+		AssetId:        "weth",
+		TxHash:         "0xfeed",
+		SubmittedPrice: "345020000000",
+		SubmittedAt:    timestamppb.New(submitted),
+		Status:         oraclev1.SubmissionStatus_STATUS_EXPIRED,
+		RetryCount:     2,
+		LastError:      "ttl elapsed before broadcast",
+	}
+	got := SubmissionStatusFromProto(in)
+	if got.Status != SubmissionStatusExpired {
+		t.Fatalf("Status = %q, want %q", got.Status, SubmissionStatusExpired)
+	}
+	if got.ReqID != "42" || got.SubmittedPrice != "345020000000" || got.RetryCount != 2 {
+		t.Fatalf("unexpected: %+v", got)
+	}
+	if got.SubmittedAt == nil || !got.SubmittedAt.Equal(submitted) {
+		t.Fatalf("SubmittedAt = %v, want %v", got.SubmittedAt, submitted)
+	}
+
+	// Every proto enum value maps to a non-empty domain kind except UNSPECIFIED.
+	for proto, want := range map[oraclev1.SubmissionStatus_Status]SubmissionStatusKind{
+		oraclev1.SubmissionStatus_STATUS_PENDING:   SubmissionStatusPending,
+		oraclev1.SubmissionStatus_STATUS_CONFIRMED: SubmissionStatusConfirmed,
+		oraclev1.SubmissionStatus_STATUS_FAILED:    SubmissionStatusFailed,
+		oraclev1.SubmissionStatus_STATUS_DROPPED:   SubmissionStatusDropped,
+		oraclev1.SubmissionStatus_STATUS_EXPIRED:   SubmissionStatusExpired,
+	} {
+		if got := SubmissionStatusKindFromProto(proto); got != want {
+			t.Fatalf("SubmissionStatusKindFromProto(%v) = %q, want %q", proto, got, want)
+		}
+	}
+
+	// Zero submitted_at -> nil.
+	pending := &oraclev1.SubmissionStatus{ReqId: "0", AssetId: "weth", Status: oraclev1.SubmissionStatus_STATUS_PENDING}
+	if got := SubmissionStatusFromProto(pending); got.SubmittedAt != nil {
+		t.Fatalf("SubmittedAt should be nil when unset, got %v", got.SubmittedAt)
 	}
 }

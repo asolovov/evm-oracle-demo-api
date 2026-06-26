@@ -84,8 +84,17 @@ All responses are JSON. Error responses share the same envelope:
 | GET    | `/api/v1/assets/{id}/history`     | **501** in v1 — `price-service` has no history RPC yet. See *Known gaps*.              |
 | GET    | `/api/v1/requests/{reqId}`        | Joined request lifecycle from `indexer.GetRequest`. `req_id` must be a base-10 uint256.|
 | POST   | `/api/v1/requests/build-tx`       | ABI-encoded `requestPrice(bytes32)` calldata + resolved aggregator address.            |
+| GET    | `/api/v1/submissions`             | Paginated oracle submission history (`?asset_id` + `?page` + `?page_size`).            |
+| GET    | `/api/v1/submissions/{id}`        | One submission by non-zero base-10 `req_id` or `0x`-prefixed 32-byte tx hash.          |
 | GET    | `/api/v1/docs`                    | Swagger UI rendered against the embedded OpenAPI spec. Never rate-limited.             |
 | GET    | `/api/v1/openapi.yaml`            | The OpenAPI 3.1 spec (canonical source at [`api/openapi.yaml`](api/openapi.yaml)).     |
+
+The submissions endpoints expose oracle-service's `GetSubmissionStatus` /
+`ListSubmissions` (spec §3.4). Submission `status` is one of
+`pending` / `confirmed` / `failed` / `dropped` / `expired` — `expired` being a
+request abandoned before broadcast (TTL elapsed while queued/processing/
+signing; no nonce consumed), distinct from `failed`. Heartbeat submissions
+carry `req_id = "0"` and are reachable only by tx hash.
 
 ### `POST /api/v1/requests/build-tx`
 
@@ -152,6 +161,7 @@ required (`Validate()` fails fast on startup):
 | `REDIS_DB`                               | `0`                              |  |
 | `GRPC_CLIENT_PRICE_SERVICE_ADDR`         | `localhost:50051`                | **Required.** |
 | `GRPC_CLIENT_INDEXER_SERVICE_ADDR`       | `localhost:50052`                | **Required.** |
+| `GRPC_CLIENT_ORACLE_SERVICE_ADDR`        | `localhost:50053`                | **Required.** Backs `/api/v1/submissions`. |
 | `GRPC_CLIENT_USE_TLS`                    | `false`                          |  |
 | `GRPC_CLIENT_KEEP_ALIVE_TIME`            | `30s`                            |  |
 | `GRPC_CLIENT_KEEP_ALIVE_TIMEOUT`         | `10s`                            |  |

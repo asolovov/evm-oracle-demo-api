@@ -40,6 +40,7 @@ func setDefaults() {
 	// gRPC client dials for upstream services.
 	viper.SetDefault("grpc_client.price_service_addr", "localhost:50051")
 	viper.SetDefault("grpc_client.indexer_service_addr", "localhost:50052")
+	viper.SetDefault("grpc_client.oracle_service_addr", "localhost:50053")
 	viper.SetDefault("grpc_client.dial_timeout", "10s")
 	viper.SetDefault("grpc_client.use_tls", false)
 	viper.SetDefault("grpc_client.keep_alive.time", "30s")
