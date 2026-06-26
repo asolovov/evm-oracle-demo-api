@@ -85,6 +85,12 @@ message SubmissionStatus {
     // mined. After 3 replace-by-fee retries we give up and mark
     // dropped.
     STATUS_DROPPED = 4;
+    // Abandoned before broadcast: the request sat un-priceable (e.g.
+    // no price for the asset yet) and its TTL elapsed while still
+    // queued/processing/signing, so it never consumed a nonce. A
+    // terminal state distinct from STATUS_FAILED — nothing was sent
+    // on-chain and no nonce was reserved.
+    STATUS_EXPIRED = 5;
   }
 
   // uint256 as base-10 decimal string. "0" for heartbeat
