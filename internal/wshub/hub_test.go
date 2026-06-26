@@ -213,7 +213,7 @@ func TestHubUpdatesRegistryFromAssetRegistered(t *testing.T) {
 	indexer.emit <- models.Event{
 		Kind: models.EventKindAssetRegistered,
 		AssetRegistered: &models.AssetRegisteredEvent{
-			AssetID:    aggregatorregistry.AssetIDToBytes32Hex("weth"),
+			AssetID:    assetHash("weth"),
 			Aggregator: "0xfeedfacefeedfacefeedfacefeedfacefeedface",
 		},
 	}
@@ -342,4 +342,13 @@ func TestMarshalEnvelopes(t *testing.T) {
 	if env.Type != MessageTypeEvent {
 		t.Fatalf("event envelope type = %q", env.Type)
 	}
+}
+
+// assetHash returns the on-chain keccak256(symbol) bytes32 hex for a catalog id.
+func assetHash(id string) string {
+	h, ok := models.AssetIDHash(id)
+	if !ok {
+		panic("unknown asset id in test: " + id)
+	}
+	return h
 }

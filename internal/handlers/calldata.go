@@ -7,7 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/crypto"
 
-	"github.com/asolovov/evm-oracle-demo-api/internal/aggregatorregistry"
+	"github.com/asolovov/evm-oracle-demo-api/internal/models"
 )
 
 // requestPriceArgs is the ABI argument tuple for PriceAggregator.requestPrice.
@@ -31,10 +31,13 @@ var requestPriceSelector = func() []byte {
 
 // encodeRequestPriceCalldata returns the 0x-prefixed lowercase hex
 // concatenation of the function selector and ABI-encoded asset id bytes32.
-// The asset id is converted to its bytes32 padded form here so callers can
-// pass the lowercase-symbol form directly.
+// The on-chain asset id is keccak256(symbol); callers pass the catalog id
+// ("weth") and we resolve it to the same bytes32 the contract expects.
 func encodeRequestPriceCalldata(assetID string) (string, error) {
-	bytes32Hex := aggregatorregistry.AssetIDToBytes32Hex(assetID)
+	bytes32Hex, ok := models.AssetIDHash(assetID)
+	if !ok {
+		return "", fmt.Errorf("asset id %q is not a tracked asset", assetID)
+	}
 	raw, err := hex.DecodeString(bytes32Hex[2:])
 	if err != nil || len(raw) != 32 {
 		return "", fmt.Errorf("asset id %q does not encode to a valid bytes32", assetID)

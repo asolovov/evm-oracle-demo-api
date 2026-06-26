@@ -217,8 +217,8 @@ func (h *Hub) runIndexerStream(ctx context.Context) {
 	for ctx.Err() == nil {
 		err := h.indexer.StreamEvents(ctx, indexerclient.StreamEventsFilter{}, func(e models.Event) {
 			if e.Kind == models.EventKindAssetRegistered && e.AssetRegistered != nil {
-				if id, ok := aggregatorregistry.AssetIDFromBytes32Hex(e.AssetRegistered.AssetID); ok {
-					h.registry.Set(id, e.AssetRegistered.Aggregator)
+				if asset, ok := models.AssetByIDHash(e.AssetRegistered.AssetID); ok {
+					h.registry.Set(asset.ID, e.AssetRegistered.Aggregator)
 				}
 			}
 			payload, err := MarshalEvent(e)

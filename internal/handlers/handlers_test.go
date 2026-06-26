@@ -351,7 +351,7 @@ func TestListAssetsAttachesLastOnChain(t *testing.T) {
 		Meta: models.EventMeta{TxHash: "0xfeed", ObservedAt: now},
 		Kind: models.EventKindPriceFulfilled,
 		PriceFulfilled: &models.PriceFulfilledEvent{
-			ReqID: "42", AssetID: aggregatorregistry.AssetIDToBytes32Hex("weth"),
+			ReqID: "42", AssetID: assetHash("weth"),
 			Price: "345020000000", RoundID: "7",
 		},
 	}}
@@ -386,7 +386,7 @@ func TestGetAssetPriceAttachesLastOnChain(t *testing.T) {
 		Meta: models.EventMeta{TxHash: "0xfeed", ObservedAt: now},
 		Kind: models.EventKindPriceFulfilled,
 		PriceFulfilled: &models.PriceFulfilledEvent{
-			ReqID: "42", AssetID: aggregatorregistry.AssetIDToBytes32Hex("weth"),
+			ReqID: "42", AssetID: assetHash("weth"),
 			Price: "345020000000", RoundID: "7",
 		},
 	}}
@@ -631,4 +631,13 @@ func mustJSON(t *testing.T, rec *httptest.ResponseRecorder, out any) {
 	if err := json.NewDecoder(rec.Body).Decode(out); err != nil {
 		t.Fatalf("decode response: %v (body=%s)", err, rec.Body.String())
 	}
+}
+
+// assetHash returns the on-chain keccak256(symbol) bytes32 hex for a catalog id.
+func assetHash(id string) string {
+	h, ok := models.AssetIDHash(id)
+	if !ok {
+		panic("unknown asset id in test: " + id)
+	}
+	return h
 }
