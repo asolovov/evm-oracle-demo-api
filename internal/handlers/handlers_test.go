@@ -20,12 +20,14 @@ import (
 	"github.com/asolovov/evm-oracle-demo-api/internal/priceclient"
 )
 
+const wethIDHash = "0x0f8a193ff464434486c0daf7db2a895884365d2bc84ba47a68fcf89c1b14b5b8" // keccak256("WETH"), per deployment
+
 // --- mocks ---------------------------------------------------------------
 
 type priceMock struct {
-	prices  map[string]models.AggregatedPrice
+	prices   map[string]models.AggregatedPrice
 	notFound map[string]bool
-	err     error
+	err      error
 }
 
 func (m *priceMock) GetPrice(_ context.Context, assetID string) (models.AggregatedPrice, error) {
@@ -351,7 +353,7 @@ func TestListAssetsAttachesLastOnChain(t *testing.T) {
 		Meta: models.EventMeta{TxHash: "0xfeed", ObservedAt: now},
 		Kind: models.EventKindPriceFulfilled,
 		PriceFulfilled: &models.PriceFulfilledEvent{
-			ReqID: "42", AssetID: assetHash("weth"),
+			ReqID: "42", AssetID: wethIDHash,
 			Price: "345020000000", RoundID: "7",
 		},
 	}}
@@ -386,7 +388,7 @@ func TestGetAssetPriceAttachesLastOnChain(t *testing.T) {
 		Meta: models.EventMeta{TxHash: "0xfeed", ObservedAt: now},
 		Kind: models.EventKindPriceFulfilled,
 		PriceFulfilled: &models.PriceFulfilledEvent{
-			ReqID: "42", AssetID: assetHash("weth"),
+			ReqID: "42", AssetID: wethIDHash,
 			Price: "345020000000", RoundID: "7",
 		},
 	}}
@@ -631,13 +633,4 @@ func mustJSON(t *testing.T, rec *httptest.ResponseRecorder, out any) {
 	if err := json.NewDecoder(rec.Body).Decode(out); err != nil {
 		t.Fatalf("decode response: %v (body=%s)", err, rec.Body.String())
 	}
-}
-
-// assetHash returns the on-chain keccak256(symbol) bytes32 hex for a catalog id.
-func assetHash(id string) string {
-	h, ok := models.AssetIDHash(id)
-	if !ok {
-		panic("unknown asset id in test: " + id)
-	}
-	return h
 }

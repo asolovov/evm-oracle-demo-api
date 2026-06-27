@@ -18,25 +18,44 @@ import (
 // symbol. Instead we precompute the hash for every catalog asset once and
 // keep both directions as lookup tables.
 var (
-	assetIDHashByID   = make(map[string]string, len(AssetCatalog)) // lowercase id -> 0x bytes32 hex
-	assetByIDHashLower = make(map[string]Asset, len(AssetCatalog)) // lowercase 0x bytes32 hex -> Asset
+	assetIDHashByID    = make(map[string]string, len(AssetCatalog))   // lowercase id -> 0x bytes32 hex
+	assetIDBytesByID   = make(map[string][32]byte, len(AssetCatalog)) // lowercase id -> raw bytes32
+	assetByIDHashLower = make(map[string]Asset, len(AssetCatalog))    // lowercase 0x bytes32 hex -> Asset
 )
 
 //nolint:gochecknoinits // derive the keccak asset-id tables once from the static catalog at load.
 func init() {
 	for _, a := range AssetCatalog {
-		h := "0x" + hex.EncodeToString(crypto.Keccak256([]byte(a.Symbol)))
+		// Uppercase the symbol defensively: the contract convention is
+		// keccak256 over the UPPERCASE ticker, so a future catalog entry
+		// with a non-uppercase Symbol still derives the on-chain id. (The
+		// deployment-pinned test in assetid_test.go is the ultimate guard.)
+		var digest [32]byte
+		copy(digest[:], crypto.Keccak256([]byte(strings.ToUpper(a.Symbol))))
+		h := "0x" + hex.EncodeToString(digest[:])
+
 		assetIDHashByID[a.ID] = h
+		assetIDBytesByID[a.ID] = digest
 		assetByIDHashLower[h] = a
 	}
 }
 
 // AssetIDHash returns the on-chain bytes32 asset id (0x-prefixed lowercase
-// hex) for a catalog asset, looked up by its canonical lowercase id or its
-// symbol. Returns false if the asset is not tracked.
+// hex) for a catalog asset. The lookup key is normalised to the lowercase
+// canonical id, so both the id ("weth") and the symbol ("WETH") resolve as
+// long as the symbol lowercases to the id (true for every catalog asset).
+// Returns false if the asset is not tracked.
 func AssetIDHash(idOrSymbol string) (string, bool) {
 	h, ok := assetIDHashByID[NormaliseAssetID(idOrSymbol)]
 	return h, ok
+}
+
+// AssetIDHashBytes is AssetIDHash as the raw 32-byte digest, so callers that
+// need to ABI-pack the bytes32 (e.g. build-tx calldata) avoid a hex
+// encode/decode round-trip. Returns false if the asset is not tracked.
+func AssetIDHashBytes(idOrSymbol string) ([32]byte, bool) {
+	b, ok := assetIDBytesByID[NormaliseAssetID(idOrSymbol)]
+	return b, ok
 }
 
 // AssetByIDHash reverse-looks-up the catalog asset for an on-chain bytes32

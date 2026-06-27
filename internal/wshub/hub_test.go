@@ -21,6 +21,8 @@ import (
 	"github.com/asolovov/evm-oracle-demo-api/internal/models"
 )
 
+const wethIDHash = "0x0f8a193ff464434486c0daf7db2a895884365d2bc84ba47a68fcf89c1b14b5b8" // keccak256("WETH"), per deployment
+
 // --- mock clients --------------------------------------------------------
 
 type priceMock struct {
@@ -213,7 +215,7 @@ func TestHubUpdatesRegistryFromAssetRegistered(t *testing.T) {
 	indexer.emit <- models.Event{
 		Kind: models.EventKindAssetRegistered,
 		AssetRegistered: &models.AssetRegisteredEvent{
-			AssetID:    assetHash("weth"),
+			AssetID:    wethIDHash,
 			Aggregator: "0xfeedfacefeedfacefeedfacefeedfacefeedface",
 		},
 	}
@@ -342,13 +344,4 @@ func TestMarshalEnvelopes(t *testing.T) {
 	if env.Type != MessageTypeEvent {
 		t.Fatalf("event envelope type = %q", env.Type)
 	}
-}
-
-// assetHash returns the on-chain keccak256(symbol) bytes32 hex for a catalog id.
-func assetHash(id string) string {
-	h, ok := models.AssetIDHash(id)
-	if !ok {
-		panic("unknown asset id in test: " + id)
-	}
-	return h
 }

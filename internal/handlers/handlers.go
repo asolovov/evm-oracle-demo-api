@@ -251,6 +251,14 @@ func (a *API) latestOnChainRound(ctx context.Context, assetID string) *models.Ev
 	if len(events) == 0 || events[0].PriceFulfilled == nil {
 		return nil
 	}
+	// Defensive: only trust the row if its asset id actually matches what we
+	// asked for. If the indexer ever ignored or loosely-matched the filter,
+	// blindly taking events[0] would attach another asset's last on-chain
+	// price to this asset's summary. The indexer emits the id lowercased;
+	// compare case-insensitively to be safe.
+	if !strings.EqualFold(events[0].PriceFulfilled.AssetID, idHash) {
+		return nil
+	}
 	return &events[0]
 }
 
