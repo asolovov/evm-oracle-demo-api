@@ -49,4 +49,3 @@ func Options(cfg config.GRPCClientConfig) ([]grpc.DialOption, error) {
 
 	return opts, nil
 }
-
