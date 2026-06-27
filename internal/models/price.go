@@ -75,9 +75,3 @@ type PriceDetail struct {
 	LastRoundID      string               `json:"last_round_id,omitempty"`
 	Sources          []SourceContribution `json:"sources"`
 }
-
-// HistoryPoint is one row of the price history time-series.
-type HistoryPoint struct {
-	Timestamp time.Time `json:"timestamp"`
-	Price     float64   `json:"price"`
-}

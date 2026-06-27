@@ -35,8 +35,6 @@ Redis.
 | WebSocket fan-out (`/ws/stream`) | implemented |
 | Redis-backed sliding-window rate limit (60/min + burst 10 by default) | implemented |
 | Prometheus `/metrics` + `/healthz` + `/readyz` | implemented |
-| `requestPrice(bytes32)` calldata builder | implemented |
-| Historical price endpoint | **stubbed — 501** until `price-service` exposes a history RPC |
 | External audit | out of scope — see the parent [EVM Oracle Demo](https://github.com/asolovov) project |
 
 This is the BFF tier of a portfolio-grade EVM Oracle Demo — see the
@@ -81,9 +79,7 @@ All responses are JSON. Error responses share the same envelope:
 | GET    | `/api/v1/health`                  | Liveness + author credential block (FR-09). Never rate-limited.                        |
 | GET    | `/api/v1/assets`                  | 10 catalog entries + per-asset latest price + last on-chain fulfillment.               |
 | GET    | `/api/v1/assets/{id}/price`       | Drill-down. 404 on unknown id / no price yet; 502 if `price-service` is unreachable.   |
-| GET    | `/api/v1/assets/{id}/history`     | **501** in v1 — `price-service` has no history RPC yet. See *Known gaps*.              |
 | GET    | `/api/v1/requests/{reqId}`        | Joined request lifecycle from `indexer.GetRequest`. `req_id` must be a base-10 uint256.|
-| POST   | `/api/v1/requests/build-tx`       | ABI-encoded `requestPrice(bytes32)` calldata + resolved aggregator address.            |
 | GET    | `/api/v1/submissions`             | Paginated oracle submission history (`?asset_id` + `?page` + `?page_size`).            |
 | GET    | `/api/v1/submissions/{id}`        | One submission by non-zero base-10 `req_id` or `0x`-prefixed 32-byte tx hash.          |
 | GET    | `/api/v1/docs`                    | Swagger UI rendered against the embedded OpenAPI spec. Never rate-limited.             |
@@ -95,31 +91,6 @@ The submissions endpoints expose oracle-service's `GetSubmissionStatus` /
 request abandoned before broadcast (TTL elapsed while queued/processing/
 signing; no nonce consumed), distinct from `failed`. Heartbeat submissions
 carry `req_id = "0"` and are reachable only by tx hash.
-
-### `POST /api/v1/requests/build-tx`
-
-```json
-{ "asset_id": "weth", "chain_id": 11155111 }
-```
-
-Returns:
-
-```json
-{
-  "to":          "0xc0Ff…",       // PriceAggregator for this asset
-  "data":        "0x….…",         // selector + bytes32 assetId
-  "value":       "0",             // wei; v1 doesn't query the contract's requestFee()
-  "chain_id":    11155111,
-  "chain_name":  "ethereum-sepolia"
-}
-```
-
-- The endpoint **never submits** — the frontend signs and broadcasts.
-- 404 on unknown asset.
-- 400 on `chain_id` mismatch.
-- 503 when the aggregator address for the requested asset hasn't been
-  observed yet (registry seeded from `indexer.ListEvents(ASSET_REGISTERED)`
-  on startup; topped up live by the WS hub).
 
 ---
 
@@ -172,8 +143,6 @@ required (`Validate()` fails fast on startup):
 | `RATE_LIMIT_BURST_SIZE`                  | `10`                             |  |
 | `AUTHOR_NAME`                            | (empty)                          | **Required.** Echoed in `/api/v1/health` (FR-09). |
 | `AUTHOR_LINKS`                           | `{}`                             | JSON object string, e.g. `AUTHOR_LINKS='{"github":"…","linkedin":"…"}'`. |
-| `CHAIN_CHAIN_ID`                         | `11155111` (Ethereum Sepolia)    | Must match the contracts deployment. |
-| `CHAIN_REGISTRY_ADDRESS`                 | `0x89a6c12a403733c6a817472cec46a530581cb7ef` | OracleRegistry contract address. |
 | `TELEMETRY_LOG_LEVEL`                    | `info`                           |  |
 | `TELEMETRY_LOG_FORMAT`                   | `json`                           |  |
 
@@ -234,8 +203,6 @@ never the raw URL — keeps label cardinality bounded.
 
 | Gap | Plan |
 |-----|------|
-| `/api/v1/assets/{id}/history` returns **501** | Waits on a `price.v1.PriceService.GetHistory` RPC. The handler shape is in place so it'll wire in one commit once the upstream lands. |
-| `build-tx.value` is hardcoded to `"0"` | The aggregator's `requestFee()` view isn't queried — the BFF has no chain client by design. A future enhancement could either dial chain RPC or cache the fee from a periodic indexer-side broadcast. |
 | Aggregator registry only resyncs on live `AssetRegistered` events | Acceptable for the demo where assets are seeded once at deploy time. A periodic ListEvents poll could be added but is YAGNI for now. |
 | Stream-loop reconnect backoff is fixed | Exponential backoff would be nice; constant `5s` is fine for the demo. |
 

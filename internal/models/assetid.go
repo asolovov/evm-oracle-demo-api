@@ -18,9 +18,8 @@ import (
 // symbol. Instead we precompute the hash for every catalog asset once and
 // keep both directions as lookup tables.
 var (
-	assetIDHashByID    = make(map[string]string, len(AssetCatalog))   // lowercase id -> 0x bytes32 hex
-	assetIDBytesByID   = make(map[string][32]byte, len(AssetCatalog)) // lowercase id -> raw bytes32
-	assetByIDHashLower = make(map[string]Asset, len(AssetCatalog))    // lowercase 0x bytes32 hex -> Asset
+	assetIDHashByID    = make(map[string]string, len(AssetCatalog)) // lowercase id -> 0x bytes32 hex
+	assetByIDHashLower = make(map[string]Asset, len(AssetCatalog))  // lowercase 0x bytes32 hex -> Asset
 )
 
 //nolint:gochecknoinits // derive the keccak asset-id tables once from the static catalog at load.
@@ -30,12 +29,8 @@ func init() {
 		// keccak256 over the UPPERCASE ticker, so a future catalog entry
 		// with a non-uppercase Symbol still derives the on-chain id. (The
 		// deployment-pinned test in assetid_test.go is the ultimate guard.)
-		var digest [32]byte
-		copy(digest[:], crypto.Keccak256([]byte(strings.ToUpper(a.Symbol))))
-		h := "0x" + hex.EncodeToString(digest[:])
-
+		h := "0x" + hex.EncodeToString(crypto.Keccak256([]byte(strings.ToUpper(a.Symbol))))
 		assetIDHashByID[a.ID] = h
-		assetIDBytesByID[a.ID] = digest
 		assetByIDHashLower[h] = a
 	}
 }
@@ -48,14 +43,6 @@ func init() {
 func AssetIDHash(idOrSymbol string) (string, bool) {
 	h, ok := assetIDHashByID[NormaliseAssetID(idOrSymbol)]
 	return h, ok
-}
-
-// AssetIDHashBytes is AssetIDHash as the raw 32-byte digest, so callers that
-// need to ABI-pack the bytes32 (e.g. build-tx calldata) avoid a hex
-// encode/decode round-trip. Returns false if the asset is not tracked.
-func AssetIDHashBytes(idOrSymbol string) ([32]byte, bool) {
-	b, ok := assetIDBytesByID[NormaliseAssetID(idOrSymbol)]
-	return b, ok
 }
 
 // AssetByIDHash reverse-looks-up the catalog asset for an on-chain bytes32

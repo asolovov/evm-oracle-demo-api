@@ -34,7 +34,3 @@ services:
       GRPC_CLIENT_PRICE_SERVICE_ADDR: "host.docker.internal:50051"
       GRPC_CLIENT_INDEXER_SERVICE_ADDR: "host.docker.internal:50052"
       GRPC_CLIENT_ORACLE_SERVICE_ADDR: "host.docker.internal:50053"
-      # Chain defaults match the contracts repo's deployment on Ethereum
-      # Sepolia. Override CHAIN_* if you redeploy.
-      CHAIN_CHAIN_ID: 11155111
-      CHAIN_REGISTRY_ADDRESS: "0x89a6c12a403733c6a817472cec46a530581cb7ef"

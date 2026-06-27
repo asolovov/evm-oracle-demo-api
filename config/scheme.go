@@ -17,7 +17,6 @@ type Scheme struct {
 	GRPCClient GRPCClientConfig `mapstructure:"grpc_client"`
 	RateLimit  RateLimitConfig  `mapstructure:"rate_limit"`
 	Author     AuthorConfig     `mapstructure:"author"`
-	Chain      ChainConfig      `mapstructure:"chain"`
 	Telemetry  TelemetryConfig  `mapstructure:"telemetry"`
 
 	// Env is the application environment (e.g. prod, dev, local). Drives
@@ -99,15 +98,6 @@ type AuthorConfig struct {
 	Links map[string]string `mapstructure:"links"`
 }
 
-// ChainConfig holds the per-chain settings the build-tx helper relies on.
-// Single-chain by spec (currently Ethereum Sepolia per the live deployment).
-type ChainConfig struct {
-	ChainID            int64  `mapstructure:"chain_id"`
-	Name               string `mapstructure:"name"`
-	RegistryAddress    string `mapstructure:"registry_address"`
-	ExplorerURLPattern string `mapstructure:"explorer_url_pattern"`
-}
-
 // TelemetryConfig holds the logger + future tracing settings.
 type TelemetryConfig struct {
 	LogLevel  string `mapstructure:"log_level"`
@@ -139,12 +129,6 @@ func (s *Scheme) Validate() error {
 	}
 	if s.GRPCClient.OracleServiceAddr == "" {
 		errs = append(errs, errors.New("grpc_client.oracle_service_addr is required"))
-	}
-	if s.Chain.ChainID <= 0 {
-		errs = append(errs, errors.New("chain.chain_id is required (e.g. 11155111 for Ethereum Sepolia)"))
-	}
-	if s.Chain.RegistryAddress == "" {
-		errs = append(errs, errors.New("chain.registry_address is required"))
 	}
 	if s.RateLimit.Enabled && s.RateLimit.RequestsPerMinute <= 0 {
 		errs = append(errs, fmt.Errorf("rate_limit.requests_per_minute must be > 0 when enabled, got %d", s.RateLimit.RequestsPerMinute))

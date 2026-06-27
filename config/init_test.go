@@ -34,7 +34,6 @@ func TestDefaultsCoverEverySchemeKey(t *testing.T) {
 		"grpc_client.subscribe.asset_ids", "grpc_client.subscribe.reconnect_backoff",
 		"rate_limit.enabled", "rate_limit.requests_per_minute", "rate_limit.burst_size",
 		"author.name", "author.links",
-		"chain.chain_id", "chain.name", "chain.registry_address", "chain.explorer_url_pattern",
 		"telemetry.log_level", "telemetry.log_format",
 	} {
 		if !viper.IsSet(key) {
@@ -70,16 +69,6 @@ func TestValidateRejectsMissingRequired(t *testing.T) {
 			"oracle_addr_empty",
 			func(s *Scheme) { s.GRPCClient.OracleServiceAddr = "" },
 			"oracle_service_addr",
-		},
-		{
-			"chain_id_zero",
-			func(s *Scheme) { s.Chain.ChainID = 0 },
-			"chain.chain_id",
-		},
-		{
-			"registry_empty",
-			func(s *Scheme) { s.Chain.RegistryAddress = "" },
-			"chain.registry_address",
 		},
 		{
 			"author_name_empty",
@@ -137,11 +126,6 @@ func happyPathScheme() Scheme {
 			PriceServiceAddr:   "localhost:50051",
 			IndexerServiceAddr: "localhost:50052",
 			OracleServiceAddr:  "localhost:50053",
-		},
-		Chain: ChainConfig{
-			ChainID:         11155111,
-			Name:            "ethereum-sepolia",
-			RegistryAddress: "0x89a6c12a403733c6a817472cec46a530581cb7ef",
 		},
 		Author: AuthorConfig{Name: "Andrei Solovov"},
 		RateLimit: RateLimitConfig{

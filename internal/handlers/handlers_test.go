@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -131,11 +130,6 @@ func newTestAPI() (*API, *priceMock, *indexerMock) {
 			Name:  "Andrei Solovov",
 			Links: map[string]string{"github": "https://github.com/asolovov"},
 		},
-		Chain: config.ChainConfig{
-			ChainID:         11155111,
-			Name:            "ethereum-sepolia",
-			RegistryAddress: "0x89a6c12a403733c6a817472cec46a530581cb7ef",
-		},
 		Version:   "test",
 		ServiceID: "evm-oracle-demo-api",
 	}, price, indexer
@@ -248,17 +242,6 @@ func TestGetAssetPriceOK(t *testing.T) {
 	}
 }
 
-func TestGetAssetHistoryReturns501(t *testing.T) {
-	api, _, _ := newTestAPI()
-	r := newTestRouter(t, api)
-
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/assets/weth/history", nil))
-	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("history should be 501, got %d", rec.Code)
-	}
-}
-
 func TestGetRequestNotFound(t *testing.T) {
 	api, _, _ := newTestAPI()
 	r := newTestRouter(t, api)
@@ -292,57 +275,6 @@ func TestGetRequestOK(t *testing.T) {
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/requests/42", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestBuildTxValidatesInputs(t *testing.T) {
-	api, _, _ := newTestAPI()
-	r := newTestRouter(t, api)
-
-	// Bad JSON.
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/requests/build-tx", strings.NewReader("not-json")))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("bad JSON should 400, got %d", rec.Code)
-	}
-
-	// Unknown asset.
-	body, _ := json.Marshal(BuildTxRequest{AssetID: "doge"})
-	rec = httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/requests/build-tx", bytes.NewReader(body)))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("unknown asset should 404, got %d", rec.Code)
-	}
-
-	// Chain mismatch.
-	body, _ = json.Marshal(BuildTxRequest{AssetID: "weth", ChainID: 1})
-	rec = httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/requests/build-tx", bytes.NewReader(body)))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("chain mismatch should 400, got %d", rec.Code)
-	}
-}
-
-func TestBuildTxOK(t *testing.T) {
-	api, _, _ := newTestAPI()
-	r := newTestRouter(t, api)
-
-	body, _ := json.Marshal(BuildTxRequest{AssetID: "weth", ChainID: 11155111})
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/requests/build-tx", bytes.NewReader(body)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
-	}
-	var resp BuildTxResponse
-	mustJSON(t, rec, &resp)
-	if !strings.HasPrefix(resp.Data, "0x") || len(resp.Data) != 2+8+64 {
-		t.Fatalf("expected 0x + 4-byte selector + 32-byte arg (74 chars total), got %q (len %d)", resp.Data, len(resp.Data))
-	}
-	if resp.ChainID != 11155111 || resp.Value != "0" {
-		t.Fatalf("response unexpected: %+v", resp)
-	}
-	if resp.To == "" || resp.To == "0x" {
-		t.Fatalf("expected aggregator address in 'to', got %q", resp.To)
 	}
 }
 
@@ -418,17 +350,6 @@ func TestGetAssetPriceUpstreamErrorReturns502(t *testing.T) {
 	}
 }
 
-func TestGetAssetHistoryUnknownAsset(t *testing.T) {
-	api, _, _ := newTestAPI()
-	r := newTestRouter(t, api)
-
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/assets/doge/history", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("unknown asset history should 404, got %d", rec.Code)
-	}
-}
-
 func TestGetRequestEmptyReqID(t *testing.T) {
 	api, _, _ := newTestAPI()
 	r := newTestRouter(t, api)
@@ -445,20 +366,6 @@ func TestGetRequestEmptyReqID(t *testing.T) {
 type fakeError string
 
 func (f fakeError) Error() string { return string(f) }
-
-func TestBuildTxUnresolvedAggregator(t *testing.T) {
-	api, _, _ := newTestAPI()
-	// Drop the WETH entry to simulate the registry not yet seeded.
-	api.Registry = aggregatorregistry.New()
-	r := newTestRouter(t, api)
-
-	body, _ := json.Marshal(BuildTxRequest{AssetID: "weth"})
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/requests/build-tx", bytes.NewReader(body)))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("missing aggregator should 503, got %d body=%s", rec.Code, rec.Body.String())
-	}
-}
 
 func TestListSubmissions(t *testing.T) {
 	api, _, _ := newTestAPI()
@@ -615,8 +522,7 @@ func TestOpenAPISpecServesEmbeddedYAML(t *testing.T) {
 	for _, marker := range []string{
 		"openapi: 3.1.0",
 		"/api/v1/health:",
-		"/api/v1/requests/build-tx:",
-		"BuildTxResponse:",
+		"/api/v1/assets:",
 		"/api/v1/submissions:",
 		"/api/v1/submissions/{id}:",
 		"SubmissionStatus:",

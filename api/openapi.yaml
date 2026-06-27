@@ -24,7 +24,7 @@ tags:
   - name: meta
     description: Service metadata.
   - name: assets
-    description: Per-asset prices, history, and on-chain state.
+    description: Per-asset prices and on-chain state.
   - name: requests
     description: User-initiated price requests and the calldata builder.
   - name: submissions
@@ -101,54 +101,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/v1/assets/{id}/history:
-    get:
-      tags: [assets]
-      summary: Historical time-series for one asset.
-      description: |
-        Stubbed in v1 — `price-service` has no history RPC yet. Returns 501
-        with a pointer to the README's "Known gaps" section. The handler shape
-        is in place so this endpoint will activate in one commit once the
-        upstream RPC ships.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: from
-          in: query
-          required: false
-          schema:
-            type: integer
-            format: int64
-          description: Inclusive lower bound (epoch seconds).
-        - name: to
-          in: query
-          required: false
-          schema:
-            type: integer
-            format: int64
-        - name: interval
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: ["1m", "5m", "1h", "1d"]
-      responses:
-        "404":
-          description: Asset not tracked.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "501":
-          description: History endpoint not yet implemented in this version.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
   /api/v1/requests/{reqId}:
     get:
       tags: [requests]
@@ -183,47 +135,6 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "502":
           description: Indexer-service is unreachable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
-  /api/v1/requests/build-tx:
-    post:
-      tags: [requests]
-      summary: ABI-encoded calldata for `PriceAggregator.requestPrice(bytes32)`.
-      description: |
-        Pure builder — the BFF resolves the aggregator contract for the asset,
-        ABI-encodes the `requestPrice` call, and returns the
-        `{to, data, value, chain_id}` tuple the frontend signs and broadcasts.
-        **Never submits**.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/BuildTxRequest"
-      responses:
-        "200":
-          description: Calldata + aggregator address + chain context.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/BuildTxResponse"
-        "400":
-          description: Bad body or `chain_id` mismatch.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "404":
-          description: Asset not tracked.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "503":
-          description: Aggregator address for this asset has not been observed yet.
           content:
             application/json:
               schema:
@@ -492,41 +403,6 @@ components:
         fulfilled_at:
           type: string
           format: date-time
-
-    BuildTxRequest:
-      type: object
-      required: [asset_id]
-      properties:
-        asset_id:
-          type: string
-          example: weth
-        chain_id:
-          type: integer
-          format: int64
-          description: Optional. When set, MUST match the BFF's configured chain.
-          example: 11155111
-
-    BuildTxResponse:
-      type: object
-      required: [to, data, value, chain_id]
-      properties:
-        to:
-          type: string
-          description: PriceAggregator contract address for this asset.
-        data:
-          type: string
-          description: 0x-prefixed ABI-encoded `requestPrice(bytes32)` calldata.
-        value:
-          type: string
-          description: Native-token fee in wei. v1 hardcodes "0".
-          example: "0"
-        chain_id:
-          type: integer
-          format: int64
-          example: 11155111
-        chain_name:
-          type: string
-          example: ethereum-sepolia
 
     SubmissionStatus:
       type: object

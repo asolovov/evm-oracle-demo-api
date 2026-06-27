@@ -59,14 +59,6 @@ func setDefaults() {
 	viper.SetDefault("author.name", "")
 	viper.SetDefault("author.links", map[string]string{})
 
-	// Chain defaults match the live deployment on Ethereum Sepolia
-	// (chainId 11155111, registry contract from evm-oracle-demo-contracts
-	// main/deployments/ethereum-sepolia/). Override via env to retarget.
-	viper.SetDefault("chain.chain_id", int64(11155111))
-	viper.SetDefault("chain.name", "ethereum-sepolia")
-	viper.SetDefault("chain.registry_address", "0x89a6c12a403733c6a817472cec46a530581cb7ef")
-	viper.SetDefault("chain.explorer_url_pattern", "https://sepolia.etherscan.io/tx/{tx_hash}")
-
 	// Telemetry.
 	viper.SetDefault("telemetry.log_level", "info")
 	viper.SetDefault("telemetry.log_format", "json")

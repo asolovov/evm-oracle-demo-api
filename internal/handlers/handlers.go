@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/asolovov/evm-oracle-demo-api/config"
@@ -30,7 +29,6 @@ type API struct {
 	Oracle           oracleclient.Client
 	Registry         *aggregatorregistry.Registry
 	Author           config.AuthorConfig
-	Chain            config.ChainConfig
 	Version          string
 	ServiceID        string
 	GlobalMiddleware []func(http.Handler) http.Handler
@@ -111,20 +109,6 @@ func (a *API) GetAssetPrice(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detail)
 }
 
-// GetAssetHistory serves GET /api/v1/assets/{id}/history. v1 has no
-// price-service history RPC; the endpoint surfaces a 501 with a clear pointer
-// so the frontend can hide the chart until the RPC lands. Documented in the
-// README under "known gaps".
-func (a *API) GetAssetHistory(w http.ResponseWriter, r *http.Request) {
-	assetID := models.NormaliseAssetID(chi.URLParam(r, "id"))
-	if _, ok := models.FindAsset(assetID); !ok {
-		writeError(w, http.StatusNotFound, "asset_not_tracked", "asset is not tracked")
-		return
-	}
-	writeError(w, http.StatusNotImplemented, "history_not_available",
-		"price history is not exposed by price-service v1; see README.md > Known gaps")
-}
-
 // GetRequest serves GET /api/v1/requests/{reqId}.
 func (a *API) GetRequest(w http.ResponseWriter, r *http.Request) {
 	reqID := strings.TrimSpace(chi.URLParam(r, "reqId"))
@@ -148,74 +132,6 @@ func (a *API) GetRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, summary)
-}
-
-// BuildTxRequest is the body for POST /api/v1/requests/build-tx.
-type BuildTxRequest struct {
-	AssetID string `json:"asset_id"`
-	// ChainID is optional. When set it MUST match the BFF's configured
-	// chain — the BFF refuses to build calldata for a chain it doesn't
-	// know about.
-	ChainID int64 `json:"chain_id,omitempty"`
-}
-
-// BuildTxResponse is the body returned by POST /api/v1/requests/build-tx.
-type BuildTxResponse struct {
-	To        string `json:"to"`
-	Data      string `json:"data"`
-	Value     string `json:"value"`
-	ChainID   int64  `json:"chain_id"`
-	ChainName string `json:"chain_name,omitempty"`
-}
-
-// BuildTx serves POST /api/v1/requests/build-tx. Pure calldata builder —
-// never submits. Returns the aggregator address, ABI-encoded requestPrice
-// calldata, and a suggested native-token fee (0 in v1 — see README).
-func (a *API) BuildTx(w http.ResponseWriter, r *http.Request) {
-	var body BuildTxRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_body", "request body is not valid JSON")
-		return
-	}
-
-	assetID := models.NormaliseAssetID(body.AssetID)
-	if _, ok := models.FindAsset(assetID); !ok {
-		writeError(w, http.StatusNotFound, "asset_not_tracked", "asset is not tracked")
-		return
-	}
-	if body.ChainID != 0 && body.ChainID != a.Chain.ChainID {
-		writeError(w, http.StatusBadRequest, "chain_mismatch",
-			"chain_id does not match this BFF's configured chain")
-		return
-	}
-
-	aggregator, ok := a.Registry.Aggregator(assetID)
-	if !ok {
-		writeError(w, http.StatusServiceUnavailable, "aggregator_not_resolved",
-			"aggregator address for this asset has not been observed yet; retry shortly")
-		return
-	}
-	if !common.IsHexAddress(aggregator) {
-		writeError(w, http.StatusInternalServerError, "registry_corrupt",
-			"cached aggregator address is not a valid 20-byte hex address")
-		return
-	}
-
-	calldata, err := encodeRequestPriceCalldata(assetID)
-	if err != nil {
-		logger.Log().WithError(err).Error("build_tx: calldata encoding failed")
-		writeError(w, http.StatusInternalServerError, "calldata_encode_failed",
-			"failed to encode requestPrice calldata")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, BuildTxResponse{
-		To:        common.HexToAddress(aggregator).Hex(),
-		Data:      calldata,
-		Value:     "0",
-		ChainID:   a.Chain.ChainID,
-		ChainName: a.Chain.Name,
-	})
 }
 
 // --- helpers -----------------------------------------------------------

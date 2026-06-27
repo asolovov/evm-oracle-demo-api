@@ -1,7 +1,6 @@
 package models
 
 import (
-	"encoding/hex"
 	"strings"
 	"testing"
 )
@@ -49,22 +48,6 @@ func TestCatalogSymbolsAreUppercase(t *testing.T) {
 		if a.Symbol != strings.ToUpper(a.Symbol) {
 			t.Errorf("catalog symbol %q is not uppercase", a.Symbol)
 		}
-	}
-}
-
-func TestAssetIDHashBytesMatchesHex(t *testing.T) {
-	for _, a := range AssetCatalog {
-		b, ok := AssetIDHashBytes(a.ID)
-		if !ok {
-			t.Fatalf("AssetIDHashBytes(%q) not found", a.ID)
-		}
-		h, _ := AssetIDHash(a.ID)
-		if want := "0x" + hex.EncodeToString(b[:]); want != h {
-			t.Fatalf("AssetIDHashBytes(%q)=%s disagrees with AssetIDHash=%s", a.ID, want, h)
-		}
-	}
-	if _, ok := AssetIDHashBytes("doge"); ok {
-		t.Fatalf("AssetIDHashBytes(doge) should be false")
 	}
 }
 
