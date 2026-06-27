@@ -96,10 +96,10 @@ func (app *App) Init() error {
 	}
 	app.oracleClient = oc
 
-	// Best-effort registry seed. The BFF must come up even if the
-	// indexer is temporarily unreachable — build-tx returns 503 until the
-	// registry has the aggregator address. The WS hub will refresh on
-	// live AssetRegistered events in a later commit.
+	// Best-effort registry seed. The BFF must come up even if the indexer
+	// is temporarily unreachable — asset responses simply omit the
+	// aggregator address until it's observed. The WS hub refreshes the
+	// registry on live AssetRegistered events.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := app.registry.Load(ctx, ix); err != nil {
@@ -128,7 +128,6 @@ func (app *App) Init() error {
 		Oracle:           app.oracleClient,
 		Registry:         app.registry,
 		Author:           app.config.Author,
-		Chain:            app.config.Chain,
 		Version:          app.Version(),
 		ServiceID:        "evm-oracle-demo-api",
 		GlobalMiddleware: []func(http.Handler) http.Handler{app.metrics.Middleware()},

@@ -1,6 +1,6 @@
 // Package aggregatorregistry caches the asset_id -> aggregator-address map
-// the build-tx helper needs to resolve a user-friendly asset id ("weth")
-// into the actual PriceAggregator contract a `requestPrice` tx should hit.
+// that resolves a user-friendly asset id ("weth") into the deployed
+// PriceAggregator contract address surfaced in the asset list + price detail.
 //
 // The cache is seeded at startup from indexer.ListEvents(ASSET_REGISTERED)
 // and kept fresh by the WS hub forwarding live AssetRegistered events
