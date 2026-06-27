@@ -11,11 +11,11 @@ import (
 type Metrics struct {
 	Registry *prometheus.Registry
 
-	HTTPRequestsTotal     *prometheus.CounterVec
-	HTTPRequestDurationS  *prometheus.HistogramVec
-	WSConnectionsActive   prometheus.GaugeFunc
-	WSMessagesSentTotal   prometheus.Counter
-	WSDropsTotal          prometheus.Counter
+	HTTPRequestsTotal      *prometheus.CounterVec
+	HTTPRequestDurationS   *prometheus.HistogramVec
+	WSConnectionsActive    prometheus.GaugeFunc
+	WSMessagesSentTotal    prometheus.Counter
+	WSDropsTotal           prometheus.Counter
 	RateLimitRejectedTotal *prometheus.CounterVec
 	UpstreamGRPCCallsTotal *prometheus.CounterVec
 }

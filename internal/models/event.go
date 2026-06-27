@@ -67,8 +67,8 @@ type EventMeta struct {
 // Exactly one of PriceRequested / PriceFulfilled / AssetRegistered is set
 // per the Kind discriminator.
 type Event struct {
-	Meta             EventMeta             `json:"meta"`
-	Kind             EventKind             `json:"kind"`
+	Meta            EventMeta             `json:"meta"`
+	Kind            EventKind             `json:"kind"`
 	PriceRequested  *PriceRequestedEvent  `json:"price_requested,omitempty"`
 	PriceFulfilled  *PriceFulfilledEvent  `json:"price_fulfilled,omitempty"`
 	AssetRegistered *AssetRegisteredEvent `json:"asset_registered,omitempty"`

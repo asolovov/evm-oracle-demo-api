@@ -41,4 +41,3 @@ func (a *API) Register(r chi.Router, corsMW func(http.Handler) http.Handler, api
 		r.Get("/openapi.yaml", a.OpenAPISpec)
 	})
 }
-

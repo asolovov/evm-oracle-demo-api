@@ -242,8 +242,9 @@ func (app *App) Serve() error {
 
 // Stop tears down listeners + upstream clients with a bounded deadline.
 //
-//nolint:gocognit // Shutdown intentionally walks every owned resource and
 // records the first error; flattening helpers would obscure the order.
+//
+//nolint:gocognit // Shutdown intentionally walks every owned resource and
 func (app *App) Stop() error {
 	var firstErr error
 	app.stopped.Do(func() {
