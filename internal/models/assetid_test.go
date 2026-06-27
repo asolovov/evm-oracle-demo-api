@@ -1,6 +1,10 @@
 package models
 
-import "testing"
+import (
+	"encoding/hex"
+	"strings"
+	"testing"
+)
 
 // Known-good values from the live evm-oracle-demo-contracts deployment
 // (deployments/ethereum-sepolia/addresses.json). If the contracts ever
@@ -15,9 +19,17 @@ var deployedAssetIDs = map[string]string{
 	"xag":  "0x5ccc5c04130d272bf07d6e066f4cae40cfc0313643d815db3e17af00e6ebf601",
 	"spx":  "0x1308465f1da3a6702b88abc29db16011bdb6f6a7cb404fee1daa81f8da9d9972",
 	"wti":  "0x1f29567db4e0c1628fa0f8675c031b615246dd0dd3de399fdf8b5aec1829181d",
+	"hg":   "0x7f1edccb34ff65dc749f950e76926ca09253b4f2e87cc2a946d4ecaa2716decf",
 }
 
 func TestAssetIDHashMatchesDeployment(t *testing.T) {
+	// Every catalog asset must be pinned to its deployed assetId — otherwise
+	// an un-pinned asset is only exercised by self-referential round-trips
+	// that pass for any derivation.
+	if len(deployedAssetIDs) != len(AssetCatalog) {
+		t.Fatalf("deployedAssetIDs has %d entries, catalog has %d — pin every asset",
+			len(deployedAssetIDs), len(AssetCatalog))
+	}
 	for id, want := range deployedAssetIDs {
 		got, ok := AssetIDHash(id)
 		if !ok {
@@ -26,6 +38,33 @@ func TestAssetIDHashMatchesDeployment(t *testing.T) {
 		if got != want {
 			t.Fatalf("AssetIDHash(%q) = %s, want %s (deployment)", id, got, want)
 		}
+	}
+}
+
+func TestCatalogSymbolsAreUppercase(t *testing.T) {
+	// The asset-id derivation assumes the contract convention of an
+	// uppercase ticker. init() uppercases defensively, but a non-uppercase
+	// Symbol in the catalog signals a data-entry mistake worth catching.
+	for _, a := range AssetCatalog {
+		if a.Symbol != strings.ToUpper(a.Symbol) {
+			t.Errorf("catalog symbol %q is not uppercase", a.Symbol)
+		}
+	}
+}
+
+func TestAssetIDHashBytesMatchesHex(t *testing.T) {
+	for _, a := range AssetCatalog {
+		b, ok := AssetIDHashBytes(a.ID)
+		if !ok {
+			t.Fatalf("AssetIDHashBytes(%q) not found", a.ID)
+		}
+		h, _ := AssetIDHash(a.ID)
+		if want := "0x" + hex.EncodeToString(b[:]); want != h {
+			t.Fatalf("AssetIDHashBytes(%q)=%s disagrees with AssetIDHash=%s", a.ID, want, h)
+		}
+	}
+	if _, ok := AssetIDHashBytes("doge"); ok {
+		t.Fatalf("AssetIDHashBytes(doge) should be false")
 	}
 }
 

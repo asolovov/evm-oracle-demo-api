@@ -34,16 +34,10 @@ var requestPriceSelector = func() []byte {
 // The on-chain asset id is keccak256(symbol); callers pass the catalog id
 // ("weth") and we resolve it to the same bytes32 the contract expects.
 func encodeRequestPriceCalldata(assetID string) (string, error) {
-	bytes32Hex, ok := models.AssetIDHash(assetID)
+	fixed, ok := models.AssetIDHashBytes(assetID)
 	if !ok {
 		return "", fmt.Errorf("asset id %q is not a tracked asset", assetID)
 	}
-	raw, err := hex.DecodeString(bytes32Hex[2:])
-	if err != nil || len(raw) != 32 {
-		return "", fmt.Errorf("asset id %q does not encode to a valid bytes32", assetID)
-	}
-	var fixed [32]byte
-	copy(fixed[:], raw)
 
 	encoded, err := requestPriceArgs.Pack(fixed)
 	if err != nil {
